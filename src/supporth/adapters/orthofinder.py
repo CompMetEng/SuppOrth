@@ -35,6 +35,23 @@ from . import of_config
 from .base import Adapter, AdapterError, MethodProfile, StageContext
 
 
+def find_alignment_dir(native_root: Path) -> Path | None:
+    """Directory that holds SpeciesIDs.txt and the Blast*.txt tables."""
+    root = Path(native_root)
+    if (root / "WorkingDirectory" / "SpeciesIDs.txt").is_file():
+        work_dir = root / "WorkingDirectory"
+    elif (root / "SpeciesIDs.txt").is_file():
+        work_dir = root
+    else:
+        found = next(root.rglob("SpeciesIDs.txt"), None)
+        if found is None:
+            return None
+        work_dir = found.parent
+    if not any(work_dir.glob("Blast*_*.txt*")):
+        return None
+    return work_dir
+
+
 def _split_genes(cell: str) -> list[str]:
     if not cell:
         return []
@@ -45,11 +62,12 @@ def _split_genes(cell: str) -> list[str]:
 class Methods:
     """OrthoFinder's method choices, as configured for one run.
 
-    The default is BLAST → MCL → MAFFT → IQ-TREE → gene-tree reconciliation
-    (``-M msa -T iqtree``). That is the phylogenetic corner of the complementary
-    split: Broccoli searches with DIAMOND and builds FastTree trees, and
-    SonicParanoid searches with MMseqs2 and does not reconcile gene trees.
-    ``dendroblast`` or ``-T fasttree`` are opt-in via ``--opt``.
+    Sequence search is BLAST or DIAMOND, chosen with ``--alignment``
+    (OrthoFinder ``-S``). The rest of the default stack is MCL → MAFFT →
+    IQ-TREE → gene-tree reconciliation (``-M msa -T iqtree``). Broccoli and
+    SonicParanoid do not pick the aligner; they reuse this search when they
+    can, or keep their own method when they cannot. ``dendroblast`` or
+    ``-T fasttree`` are opt-in via ``--opt``.
     """
 
     search: str = ORTHOFINDER.search
@@ -105,9 +123,9 @@ class OrthoFinder(Adapter):
     shadows_path = True
     install_notes = (
         "GPL-3.0; fetched from upstream and invoked as a subprocess. "
-        "Default stack is BLAST, MCL, MAFFT and IQ-TREE (gene-tree "
-        "reconciliation). Bundled helper binaries are linked to the shared bin "
-        "at install time."
+        "Default stack is the --alignment search (DIAMOND or BLAST), MCL, "
+        "MAFFT and IQ-TREE (gene-tree reconciliation). Bundled helper binaries "
+        "are linked to the shared bin at install time."
     )
 
     search_program = ORTHOFINDER.search
@@ -147,7 +165,7 @@ class OrthoFinder(Adapter):
         jobs = of_config.search_job_count(len(context.proteomes))
         return MethodProfile(
             search=f"{program} (via OrthoFinder)",
-            clustering="MCL on the BLAST graph",
+            clustering="MCL on the similarity graph",
             alignment=methods.aligner or ("none" if methods.mode != "msa" else ORTHOFINDER.alignment),
             tree=methods.tree_program,
             orthology=ORTHOFINDER.orthology if methods.mode == "msa" else "dendroblast graph clustering",

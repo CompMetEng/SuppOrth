@@ -360,18 +360,18 @@ def test_staging_replaces_inputs_from_an_earlier_run(tmp_path, proteomes):
     assert not (staged / "stale.fa").exists()
 
 
-def test_orthofinder_default_stack_is_blast_mafft_iqtree():
+def test_orthofinder_default_stack_is_diamond_mafft_iqtree():
     from supporth.adapters.orthofinder import OrthoFinder, parse_methods
 
     methods = parse_methods([])
     assert (methods.search, methods.mode, methods.aligner, methods.tree) == (
-        "blast",
+        "diamond",
         "msa",
         "mafft",
         "iqtree",
     )
-    assert set(methods.required_binaries()) == {"blastp", "makeblastdb", "mafft", "iqtree"}
-    assert set(OrthoFinder().extra_binaries([])) == {"blastp", "makeblastdb", "mafft", "iqtree"}
+    assert set(methods.required_binaries()) == {"diamond", "mafft", "iqtree"}
+    assert set(OrthoFinder().extra_binaries([])) == {"diamond", "mafft", "iqtree"}
 
 
 def test_orthofinder_msa_mode_requires_the_selected_programs():
@@ -388,7 +388,7 @@ def test_orthofinder_dendroblast_drops_the_aligner_and_tree():
     from supporth.adapters.orthofinder import parse_methods
 
     required = parse_methods("-M dendroblast".split()).required_binaries()
-    assert set(required) == {"blastp", "makeblastdb"}
+    assert set(required) == {"diamond"}
 
 
 def test_orthofinder_method_profile_reports_the_configured_tree(tmp_path, proteomes):
@@ -583,17 +583,18 @@ def test_orthofinder_install_includes_iqtree_not_fasttree():
     default = deps.binaries_for(["orthofinder"])
     broccoli = deps.binaries_for(["broccoli"])
 
-    assert "iqtree" in default and "mafft" in default and "blastp" in default
+    assert "iqtree" in default and "mafft" in default and "diamond" in default
     assert "FastTree" not in default
     assert "FastTree" in broccoli
     assert "iqtree" not in broccoli
 
 
-def test_complementary_stacks_do_not_share_a_search_program():
-    from supporth.method_stack import BROCCOLI, OMA, ORTHOFINDER, SONICPARANOID
+def test_alignment_default_is_diamond_and_trees_still_differ():
+    from supporth.method_stack import BROCCOLI, ORTHOFINDER, SONICPARANOID
 
-    searches = {ORTHOFINDER.search, BROCCOLI.search, SONICPARANOID.search, OMA.search}
-    assert len(searches) == 4
+    assert ORTHOFINDER.search == "diamond"
+    assert BROCCOLI.search == "diamond"
+    assert SONICPARANOID.search == "mmseqs"
     assert ORTHOFINDER.tree == "iqtree"
     assert BROCCOLI.tree == "FastTree"
     assert SONICPARANOID.tree == "none"
@@ -671,7 +672,7 @@ def test_pipeline_ingests_user_supplied_oma(tmp_path, proteomes, monkeypatch):
         fasta1=sp1.fasta,
         fasta2=sp2.fasta,
         outdir=tmp_path / "out",
-        annotate="none",
+        alignment="none",
         oma=tmp_path / "oma",
         support_lv=1,
     )
@@ -842,7 +843,7 @@ def test_pipeline_runs_end_to_end_and_supports_resume(tmp_path, proteomes, monke
         fasta1=sp1.fasta,
         fasta2=sp2.fasta,
         outdir=tmp_path / "out",
-        annotate="none",
+        alignment="none",
         support_lv=1,
     )
     outcome = pipeline.run_pipeline(config, log=lambda *_: None)
@@ -880,7 +881,7 @@ def test_pipeline_runs_three_proteomes_as_one_job(tmp_path, monkeypatch):
     config = pipeline.RunConfig(
         fastas=tuple(paths),
         outdir=tmp_path / "out3",
-        annotate="none",
+        alignment="none",
         support_lv=1,
     )
     outcome = pipeline.run_pipeline(config, log=lambda *_: None)
@@ -892,6 +893,112 @@ def test_pipeline_runs_three_proteomes_as_one_job(tmp_path, monkeypatch):
     }
     assert set(table["Species1"]) <= {"one", "two"}
     assert {"one", "two", "three"} == set(table["Species1"]) | set(table["Species2"])
+
+
+def _write_orthofinder_search(
+    directory: Path,
+    left_file: str = "speciesA.fasta",
+    right_file: str = "speciesB.fasta",
+    *,
+    compressed: bool = False,
+) -> Path:
+    work_dir = directory / "WorkingDirectory"
+    work_dir.mkdir(parents=True)
+    (work_dir / "SpeciesIDs.txt").write_text(f"0: {left_file}\n1: {right_file}\n")
+    (work_dir / "SequenceIDs.txt").write_text("0_0: a1 extra\n1_0: b1 extra\n")
+    row = "0_0\t1_0\t88.5\t10\t1\t0\t1\t10\t1\t10\t1e-40\t200\n"
+    target = work_dir / ("Blast0_1.txt.gz" if compressed else "Blast0_1.txt")
+    if compressed:
+        import gzip
+
+        with gzip.open(target, "wt") as handle:
+            handle.write(row)
+    else:
+        target.write_text(row)
+    return work_dir
+
+
+def test_identity_columns_read_orthofinder_alignment_tables(tmp_path, proteomes):
+    from supporth import similarity
+
+    work_dir = _write_orthofinder_search(tmp_path / "of")
+    index = similarity.index_from_orthofinder(work_dir, proteomes, log=lambda *_: None)
+    hit = index.get("a1", "b1")
+    assert hit is not None
+    assert hit.identity == pytest.approx(88.5)
+
+
+def test_identity_columns_read_compressed_orthofinder_tables(tmp_path, proteomes):
+    from supporth import similarity
+
+    work_dir = _write_orthofinder_search(tmp_path / "of", compressed=True)
+    index = similarity.index_from_orthofinder(work_dir, proteomes, log=lambda *_: None)
+    assert index.get("a1", "b1").identity == pytest.approx(88.5)
+
+
+def test_find_alignment_dir_points_at_orthofinder_tables(tmp_path):
+    from supporth.adapters.orthofinder import find_alignment_dir
+
+    native = tmp_path / "results"
+    _write_orthofinder_search(native)
+    found = find_alignment_dir(native)
+    assert found is not None
+    assert found.name == "WorkingDirectory"
+
+
+def test_alignment_flag_sets_orthofinder_search():
+    blast = pipeline.RunConfig(
+        fasta1=Path("a.faa"),
+        fasta2=Path("b.faa"),
+        outdir=Path("out"),
+        alignment="blast",
+    )
+    assert blast.tool_options["orthofinder"][:2] == ["-S", "blast"]
+
+    diamond = pipeline.RunConfig(
+        fasta1=Path("a.faa"),
+        fasta2=Path("b.faa"),
+        outdir=Path("out"),
+        alignment="diamond",
+    )
+    assert diamond.tool_options["orthofinder"][:2] == ["-S", "diamond"]
+
+
+def test_pipeline_reads_orthofinder_alignment_instead_of_searching(
+    tmp_path, proteomes, monkeypatch
+):
+    from supporth import similarity
+
+    sp1, sp2 = proteomes
+
+    class SearchAdapter(StubAdapter):
+        name = "orthofinder"
+        label = "F"
+
+        def run(self, context: StageContext) -> Path:
+            out = super().run(context)
+            _write_orthofinder_search(out)
+            return out
+
+    def boom(*args, **kwargs):
+        raise AssertionError("must read OrthoFinder tables, not search again")
+
+    monkeypatch.setattr(similarity, "_diamond", boom)
+    monkeypatch.setattr(similarity, "_blastp", boom)
+    monkeypatch.setattr(pipeline, "resolve", lambda _: [SearchAdapter()])
+
+    config = pipeline.RunConfig(
+        fasta1=sp1.fasta,
+        fasta2=sp2.fasta,
+        outdir=tmp_path / "out-alignment",
+        support_lv=1,
+        alignment="diamond",
+    )
+    outcome = pipeline.run_pipeline(config, log=lambda *_: None)
+    assert outcome["provenance"]["settings"]["alignment"] == "diamond"
+    row = outcome["table"]
+    hit = row[(row["Protein1"] == "a1") & (row["Protein2"] == "b1")].iloc[0]
+    assert hit["Identity"] == pytest.approx(88.5)
 
 
 def test_pipeline_reports_missing_predictors_before_running(tmp_path, proteomes, monkeypatch):

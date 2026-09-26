@@ -99,7 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--tools", default="all")
     run.add_argument("--labels", help="comma-separated species labels, one per FASTA (default: file names)")
     run.add_argument("-t", "--threads", type=int, default=0, help="0 uses all cores but one")
-    run.add_argument("--annotate", choices=("diamond", "blast", "none"), default="diamond")
+    run.add_argument(
+        "--alignment",
+        choices=("diamond", "blast", "none"),
+        default="diamond",
+        help="BLAST or DIAMOND for OrthoFinder; other steps reuse those "
+             "tables for Identity/e-value/bitscore (default: diamond)",
+    )
     run.add_argument("--resume", action="store_true", help="reuse completed stages in the output directory")
     run.add_argument("--supportLv", dest="support_lv", type=int, default=3,
                      metavar="N", choices=(1, 2, 3, 4),
@@ -278,7 +284,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         tools=args.tools,
         labels=labels,
         threads=args.threads,
-        annotate=args.annotate,
+        alignment=args.alignment,
         resume=args.resume,
         support_lv=args.support_lv,
         identity_filter=args.identity_filter,

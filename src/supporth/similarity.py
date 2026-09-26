@@ -1,18 +1,16 @@
-"""Alignment statistics used to annotate the consensus table.
+"""Identity, e-value and bit score for the consensus table.
 
-This is annotation, not evidence: the search runs after the predictors and does
-not add or remove pairs. It exists so a reader can see whether a
-weakly-supported pair is at least a decent alignment.
+These columns come from the BLAST or DIAMOND all-versus-all OrthoFinder
+already ran (``--alignment``). A second search is started only when
+OrthoFinder was not part of the run.
 
-Both directions are searched and the better hit per unordered pair is kept,
-because query/subject asymmetry is an artefact of the search rather than a
-property of the relationship. A pair with no hit is reported as missing rather
-than as zero identity: those are different statements, and the old behaviour of
-writing 0.0 made unaligned pairs look like terrible alignments.
+Both directions are read and the better hit per unordered pair is kept.
+A pair with no hit is reported as missing rather than as zero identity.
 """
 
 from __future__ import annotations
 
+import gzip
 from dataclasses import dataclass
 from collections.abc import Sequence
 from itertools import permutations
@@ -109,12 +107,20 @@ def index_from_orthofinder(
         for second in sorted(wanted):
             if first == second:
                 continue
-            table = work_dir / f"Blast{first}_{second}.txt"
-            if not table.is_file():
+            table = _orthofinder_blast_table(work_dir, first, second)
+            if table is None:
                 continue
             log(f"  reading {table.name}")
             _load_orthofinder_table(table, names, index)
     return index
+
+
+def _orthofinder_blast_table(work_dir: Path, first: str, second: str) -> Path | None:
+    for name in (f"Blast{first}_{second}.txt", f"Blast{first}_{second}.txt.gz"):
+        path = work_dir / name
+        if path.is_file():
+            return path
+    return None
 
 
 def _orthofinder_species(path: Path) -> dict[str, str]:
@@ -147,7 +153,7 @@ def _load_orthofinder_table(
     names: dict[str, str],
     index: SimilarityIndex,
 ) -> None:
-    with Path(path).open(errors="replace") as handle:
+    with _open_table(path) as handle:
         for line in handle:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 12:
@@ -164,6 +170,13 @@ def _load_orthofinder_table(
             except ValueError:
                 continue
             index.add(query, subject, hit)
+
+
+def _open_table(path: Path):
+    path = Path(path)
+    if path.name.endswith(".gz"):
+        return gzip.open(path, "rt", errors="replace")
+    return path.open(errors="replace")
 
 
 def build_index(

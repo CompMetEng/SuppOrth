@@ -82,7 +82,8 @@ Useful options:
 
     --tools orthofinder,broccoli   run a subset
     --min-support 2                keep only pairs two or more predictors agree on
-    --annotate diamond|blast|none  aligner used for the identity/e-value columns
+    --alignment diamond|blast|none OrthoFinder search; later steps reuse it
+                                   (default: diamond)
     --collapse map1.json,map2.json collapse isoforms to genes
     --opt orthofinder="-M msa"     pass extra arguments to one predictor
 
@@ -94,11 +95,11 @@ Only OrthoFinder exposes a choice of tree builder. Broccoli builds its trees
 with FastTree, and SonicParanoid builds none at all, so the tree method is an
 OrthoFinder setting rather than a global one.
 
-OrthoFinder defaults here to BLAST, MAFFT and IQ-TREE (`-S blast -M msa -A mafft
--T iqtree`). That is slower than dendroblast or FastTree, and it is the point:
-the consensus then combines a maximum-likelihood gene-tree method, Broccoli's
-FastTree-based phylogenetic clustering, SonicParanoid's MMseqs2/Pfam graph, and
-OMA's distance consistency, rather than four variations of the same idea.
+OrthoFinder's sequence search is `--alignment` (DIAMOND by default, or BLAST).
+The rest of its default stack is MAFFT and IQ-TREE (`-M msa -A mafft -T iqtree`).
+Identity, e-value and bit score on the consensus table are read from that
+same search. Broccoli and SonicParanoid keep their own methods (DIAMOND /
+MMseqs2) because they do not read OrthoFinder's tables.
 
 Override only when you want a faster or less phylogenetic OrthoFinder:
 

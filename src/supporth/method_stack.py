@@ -4,9 +4,9 @@ The four tools are not four copies of the same search. They were chosen because
 they stand for different ways of calling an orthologue: graph inference from
 sequence similarity (Broccoli, SonicParanoid), gene-tree reconciliation after
 an alignment and a tree (OrthoFinder in MSA mode), and evolutionary-distance
-consistency (OMA). Where a tool lets us pick the search program, the defaults
-also differ — BLAST, DIAMOND, MMseqs2, OMA's own Smith-Waterman — so two tools
-agreeing is not one BLAST counted twice.
+consistency (OMA). OrthoFinder's BLAST or DIAMOND search is chosen with
+``--alignment`` and reused for the consensus identity columns. SonicParanoid
+searches with MMseqs2. OMA uses its own Smith-Waterman.
 
 SuppOrth then scores a pair by how many of those independent calls recovered
 it. That is a filter, not a probability: the tools share input sequences and
@@ -38,7 +38,7 @@ class Stack:
 
 
 ORTHOFINDER = Stack(
-    search="blast",
+    search="diamond",
     clustering="MCL",
     alignment="mafft",
     tree="iqtree",

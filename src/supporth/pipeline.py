@@ -23,6 +23,7 @@ import pandas as pd
 from . import canonical, consensus, deps, figures, manifest, paths, similarity, shell
 from .adapters import Adapter, StageContext, resolve
 from .adapters.oma import OMA
+from .adapters.orthofinder import find_alignment_dir
 from .proteomes import Proteome, load_proteomes, stage_input_dir
 
 
@@ -39,7 +40,7 @@ class RunConfig:
     tools: str = "all"
     labels: tuple[str, ...] | None = None
     threads: int = 0
-    annotate: str = "diamond"
+    alignment: str = "diamond"
     resume: bool = False
     support_lv: int = 3
     identity_filter: float = 80.0
@@ -54,6 +55,10 @@ class RunConfig:
             self.fastas = (Path(self.fasta1), Path(self.fasta2))
         if len(self.fastas) < 2:
             raise ValueError("need at least two FASTA files")
+        if self.alignment in ("blast", "diamond"):
+            options = list(self.tool_options.get("orthofinder", []))
+            if "-S" not in options:
+                self.tool_options["orthofinder"] = ["-S", self.alignment, *options]
 
 
 @dataclass
@@ -93,6 +98,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
 
     reports: list[StageReport] = []
     results: list[canonical.PredictorResult] = []
+    alignment_dir = find_alignment_dir(work_root / "orthofinder")
 
     for index, adapter in enumerate(adapters, start=1):
         log(f"\n[{index}/{len(adapters)}] {adapter.name}")
@@ -113,6 +119,8 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
                 )
             )
             log(f"  reusing {pairs_json.name} ({len(result.pairs)} pairs)")
+            if alignment_dir is None:
+                alignment_dir = find_alignment_dir(work_root / adapter.name)
             continue
 
         context = StageContext(
@@ -121,6 +129,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             proteomes=proteomes,
             threads=threads,
             options=config.tool_options.get(adapter.name, []),
+            alignment_dir=alignment_dir,
         )
         context.work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -165,6 +174,9 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             )
         )
         log(f"  {result.summary()} in {elapsed / 60:.1f} min")
+        found = find_alignment_dir(native_root)
+        if found is not None:
+            alignment_dir = found
 
     if config.oma:
         oma_result, oma_report = _ingest_oma(config, proteomes, outdir, log)
@@ -178,15 +190,22 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             f"{work_root}"
         )
 
-    log("\nAnnotating with alignment statistics")
-    index = similarity.build_index(
-        proteomes,
-        work_root / "similarity",
-        threads=threads,
-        program=config.annotate,
-        log=log,
-    )
-    log(f"  {len(index)} aligned pairs available for annotation")
+    log("\nAlignment statistics")
+    if alignment_dir is not None:
+        log(f"  reading OrthoFinder {config.alignment} tables")
+        index = similarity.index_from_orthofinder(alignment_dir, proteomes, log=log)
+    elif config.alignment == "none":
+        index = similarity.SimilarityIndex()
+    else:
+        log(f"  OrthoFinder did not write alignment tables; running {config.alignment}")
+        index = similarity.build_index(
+            proteomes,
+            work_root / "alignment",
+            threads=threads,
+            program=config.alignment,
+            log=log,
+        )
+    log(f"  {len(index)} aligned pairs")
 
     table = consensus.build_table(results, index, proteomes)
     unfiltered = len(table)
@@ -362,7 +381,7 @@ def _provenance(
         "settings": {
             "tools": config.tools,
             "threads": threads,
-            "annotate": config.annotate,
+            "alignment": config.alignment,
             "support_lv": config.support_lv,
             "identity_filter": config.identity_filter,
             "oma": str(config.oma) if config.oma else None,

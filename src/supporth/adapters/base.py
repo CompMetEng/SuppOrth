@@ -73,6 +73,7 @@ class StageContext:
     sp2: Proteome | None = None
     threads: int = 1
     options: list[str] = field(default_factory=list)
+    alignment_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.proteomes:

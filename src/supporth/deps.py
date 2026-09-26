@@ -66,7 +66,7 @@ SPECS: dict[str, BinarySpec] = {
     "diamond": BinarySpec(
         name="diamond",
         purpose="fast protein similarity search",
-        wanted_by=("broccoli", "supporth"),
+        wanted_by=("broccoli", "orthofinder", "supporth"),
         version_args=("--version",),
         downloads={
             "linux-x86_64": f"https://github.com/bbuchfink/diamond/releases/download/v{DIAMOND_VERSION}/diamond-linux64.tar.gz",
@@ -76,7 +76,7 @@ SPECS: dict[str, BinarySpec] = {
         archive_member="**/diamond",
         build="archive",
         optional=False,
-        hint="required by Broccoli's default search and by consensus annotation",
+        hint="OrthoFinder --alignment diamond, Broccoli, and identity columns",
     ),
     "mmseqs": BinarySpec(
         name="mmseqs",
@@ -159,7 +159,7 @@ SPECS: dict[str, BinarySpec] = {
         },
         archive_member="**/bin/blastp",
         build="archive",
-        hint="OrthoFinder's default search; also used with --annotate blast",
+        hint="used when --alignment blast",
     ),
     "makeblastdb": BinarySpec(
         name="makeblastdb",
@@ -172,7 +172,7 @@ SPECS: dict[str, BinarySpec] = {
         },
         archive_member="**/bin/makeblastdb",
         build="archive",
-        hint="paired with blastp for OrthoFinder and --annotate blast",
+        hint="paired with blastp when --alignment blast",
     ),
 }
 
