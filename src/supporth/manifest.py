@@ -1,11 +1,4 @@
-"""Record of what is installed, so results can state their own provenance.
-
-Unpinned installs make a consensus unreproducible: two users running the same
-SuppOrth version a month apart can get different orthologues with nothing in
-the output to explain why. Every predictor is therefore installed at an
-explicit upstream ref, and the resolved commit is written here and copied into
-each run's provenance file.
-"""
+"""Record installed predictor commits, interpreters and helper binary versions."""
 
 from __future__ import annotations
 

@@ -1,14 +1,4 @@
-"""Disk accounting for the SuppOrth home directory.
-
-Three predictors, each with its own source checkout, its own Python packages
-and a profile database, add up to gigabytes. Most of that is genuinely needed,
-but a fair share is not: build trees left behind after compilation, checkouts
-of refs that are no longer installed, and temporary directories from runs that
-were interrupted. None of it is visible without knowing where to look, so it
-accumulates silently and the user finds out from their disk, not from us.
-
-This module names what is there and what can go.
-"""
+"""Report installation sizes and remove unused checkouts and build artifacts."""
 
 from __future__ import annotations
 

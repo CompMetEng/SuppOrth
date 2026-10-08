@@ -1,13 +1,8 @@
-"""Input proteomes: identifier extraction, validation and staging.
-
-Because SuppOrth now runs the predictors itself, it also controls their input.
-Identifiers are read once from the FASTA files and reused to orient every pair
-and to reject cross-species mistakes, instead of being inferred from whatever
-columns a hand-exported table happened to contain.
-"""
+"""Validate FASTA identifiers and stage proteomes for the predictors."""
 
 from __future__ import annotations
 
+import gzip
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -40,7 +35,13 @@ def read_ids(fasta: Path) -> frozenset[str]:
     fasta = Path(fasta)
     if not fasta.exists():
         raise ProteomeError(f"FASTA not found: {fasta}")
-    ids = {record.id.split()[0] for record in SeqIO.parse(str(fasta), "fasta")}
+    opener = gzip.open if fasta.suffix.lower() == ".gz" else open
+    ids = set()
+    with opener(fasta, "rt") as handle:
+        for record in SeqIO.parse(handle, "fasta"):
+            if record.id in ids:
+                raise ProteomeError(f"duplicate identifier {record.id!r} in {fasta}")
+            ids.add(record.id)
     if not ids:
         raise ProteomeError(f"no sequences parsed from {fasta}")
     return frozenset(ids)
@@ -81,6 +82,8 @@ def load_proteomes(
         raise ProteomeError(
             "proteome labels are not unique; pass explicit names with --labels"
         )
+    if any(name in {".", ".."} or "/" in name or "\\" in name for name in names):
+        raise ProteomeError("proteome labels must be file names without path separators")
 
     proteomes = tuple(
         Proteome(name, path, read_ids(path)) for name, path in zip(names, paths)
@@ -132,31 +135,26 @@ def load_pair(fasta1: Path, fasta2: Path, label1: str = "", label2: str = "") ->
 
 
 def stage_input_dir(destination: Path, proteomes: Sequence[Proteome]) -> Path:
-    """A directory holding the proteomes, as the predictors expect.
-
-    All three predictors take a directory of FASTA files rather than named
-    inputs, and they derive species names from file names. Staging with
-    predictable names keeps their outputs parseable.
-
-    The ``.fasta`` extension is not arbitrary: Broccoli scans its input
-    directory for ``*.fasta`` specifically and reports an empty directory
-    otherwise, while OrthoFinder and SonicParanoid accept it too.
-    """
+    """Stage uncompressed FASTAs with the extension required by Broccoli."""
     destination.mkdir(parents=True, exist_ok=True)
     for existing in destination.glob("*.fa*"):
         existing.unlink()
     for proteome in proteomes:
         target = destination / f"{proteome.label}{STAGED_SUFFIX}"
-        shutil.copyfile(proteome.fasta, target)
+        if proteome.fasta.suffix.lower() == ".gz":
+            with gzip.open(proteome.fasta, "rb") as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+        else:
+            shutil.copyfile(proteome.fasta, target)
     return destination
 
 
 def _label(fasta: Path) -> str:
     name = fasta.name
-    if name.endswith(".gz"):
+    if name.lower().endswith(".gz"):
         name = name[: -len(".gz")]
     for suffix in FASTA_SUFFIXES:
-        if name.endswith(suffix):
+        if name.lower().endswith(suffix):
             name = name[: -len(suffix)]
             break
     return name or fasta.stem

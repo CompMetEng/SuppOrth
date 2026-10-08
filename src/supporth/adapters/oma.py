@@ -1,14 +1,4 @@
-"""OMA standalone is not launched by SuppOrth.
-
-OMA wants its own ``DB/`` of ``*.fa`` files, a Darwin runtime, and hours of
-all-against-all alignment that the user already runs elsewhere — often on a
-cluster, with more than two genomes. What SuppOrth needs is the pairwise
-orthologue tables from that run, pointed at with ``--oma``.
-
-The files live under ``Output/PairwiseOrthologs/``. Each pair is listed once.
-Within-species files are not produced. Extra species in a multi-genome OMA run
-are ignored unless their identifiers are in the FASTAs passed to ``run``.
-"""
+"""Import existing OMA pairwise tables. Protein identifiers are matched against the input FASTAs."""
 
 from __future__ import annotations
 
@@ -82,35 +72,14 @@ class OMA(Adapter):
         if root.is_file():
             return [root]
         pairwise = self._pairwise_tables(root)
-        if proteomes:
-            pairwise = self._tables_for_species(pairwise, proteomes)
         if pairwise:
             return pairwise
         return sorted(p for p in root.rglob("OrthologousGroups.txt") if p.is_file())
 
-    def _tables_for_species(
-        self,
-        tables: list[Path],
-        proteomes: Sequence[Proteome],
-    ) -> list[Path]:
-        """Keep pairwise files whose names mention at least two input genomes.
-
-        An OMA run often includes extra species. Those files are large and
-        contribute no pairs once identifiers are filtered, so they are skipped
-        when a filename such as ``tmuris-contortus.txt`` matches the labels.
-        """
-        labels = {proteome.label.lower() for proteome in proteomes}
-        named = [
-            path
-            for path in tables
-            if len(labels & {part.lower() for part in path.stem.replace("_", "-").split("-")}) >= 2
-        ]
-        return named or tables
-
     def _pairwise_tables(self, root: Path) -> list[Path]:
         directories = [p for p in root.rglob("PairwiseOrthologs") if p.is_dir()]
-        if (root / "PairwiseOrthologs").is_dir():
-            directories.append(root / "PairwiseOrthologs")
+        if root.name == "PairwiseOrthologs" and root.is_dir():
+            directories.append(root)
         found: list[Path] = []
         seen: set[Path] = set()
         for directory in directories:

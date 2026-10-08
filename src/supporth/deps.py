@@ -1,23 +1,4 @@
-"""The shared external-binary layer.
-
-The predictors depend on an overlapping set of helper programs (DIAMOND,
-MMseqs2, BLAST+, IQ-TREE, FastTree, FastME, MCL). Installed independently that
-yields several copies at several versions, which is both wasteful and the usual
-source of "it worked last month" breakage.
-
-SuppOrth keeps exactly one copy of each in ``<home>/bin`` and puts that
-directory first on ``PATH`` for every predictor. Sharing the *installation* is
-deliberately not the same as sharing the *choice*: each predictor is still
-configured with its own search program, tree builder and clustering method, and
-that spread is what makes agreement between them informative.
-
-A binary reaches the shared directory in one of three ways, tried in order:
-
-1. already there and runnable;
-2. adopted from the ambient ``PATH`` by symlink (preferred: it is the version
-   the user already trusts);
-3. fetched from upstream and, where needed, compiled.
-"""
+"""Install, adopt and audit shared helper binaries. Release versions are pinned below."""
 
 from __future__ import annotations
 
@@ -213,13 +194,7 @@ class Bundled:
 
 
 def _can_execute(path: Path) -> bool | None:
-    """Whether a bundled binary can run on this machine at all.
-
-    Predictors ship binaries for the platform their author built on. A Linux
-    ELF executable inside a source tree unpacked on macOS is not a duplicate of
-    the shared copy so much as a trap, especially when the predictor puts its
-    own directory first on PATH.
-    """
+    """Check whether a bundled executable can start on this platform."""
     import subprocess
 
     try:
@@ -272,12 +247,7 @@ def _known_names() -> dict[str, str]:
 
 
 def find_bundled(roots: dict[str, Path] | None = None) -> list[Bundled]:
-    """Locate helper binaries duplicated inside the predictor installations.
-
-    Each predictor ships or builds its own copies of the same few programs.
-    Those copies are what drift out of step with each other, so they are worth
-    surfacing even when nothing is obviously broken.
-    """
+    """Find known helper executables inside predictor installations."""
     if roots is None:
         roots = {
             name: Path(record["root"])
@@ -326,14 +296,7 @@ def find_bundled(roots: dict[str, Path] | None = None) -> list[Bundled]:
 
 
 def link_bundled(items: Sequence[Bundled], *, log: Callable[[str], None] = print) -> int:
-    """Point bundled copies at the shared binary, keeping the original next to it.
-
-    This is opt-in on purpose. A predictor may depend on the exact build it
-    ships — SonicParanoid in particular tracks MMseqs2 closely — so replacing a
-    bundled copy can change results or break the tool. Every replacement leaves
-    a ``.supporth-orig`` beside it, and ``suppOrth audit --restore`` puts them
-    back.
-    """
+    """Replace bundled helpers with shared links and retain recoverable originals."""
     replaced = 0
     for item in items:
         if item.linked:
@@ -501,12 +464,14 @@ def _runs(spec: BinarySpec, path: Path) -> bool:
 
 def _adopt(spec: BinarySpec, source: Path, log: Callable[[str], None]) -> Path:
     """Link an existing trusted binary into the shared directory."""
-    if not source.exists():
-        raise DependencyError(f"{spec.name}: {source} does not exist")
+    source = source.resolve()
+    if not source.is_file() or not _runs(spec, source):
+        raise DependencyError(f"{spec.name}: {source} is not a runnable binary")
     target = paths.shared_bin() / spec.name
-    if target.exists() or target.is_symlink():
-        target.unlink()
-    target.symlink_to(source)
+    if source != target:
+        if target.exists() or target.is_symlink():
+            target.unlink()
+        target.symlink_to(source)
     version = shell.probe_version(spec.name, spec.version_args)
     manifest.record_binary(spec.name, path=source, version=version, origin="adopted")
     log(f"  {spec.name:<10} adopted from {source}")
@@ -528,9 +493,14 @@ def _download(url: str, destination: Path, log: Callable[[str], None]) -> Path:
     if destination.exists() and destination.stat().st_size > 0:
         return destination
     log(f"  {'':<10} fetching {url}")
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
-        with destination.open("wb") as handle:
-            shutil.copyfileobj(response, handle)
+    temporary = destination.with_name(destination.name + ".part")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
+            with temporary.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
     return destination
 
 

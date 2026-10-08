@@ -1,14 +1,4 @@
-"""Broccoli adapter.
-
-Broccoli is distributed as a script rather than a package: it is run from a
-working directory and writes numbered ``dir_step*`` folders into it, so each
-stage gets its own scratch directory. Its pairwise output is produced by
-step 4.
-
-Its phylogeny-aware network clustering, run on a DIAMOND search, is the graph
-corner of the complementary split: OrthoFinder searches with BLAST and
-reconciles gene trees, SonicParanoid searches with MMseqs2.
-"""
+"""Run Broccoli in its own working directory and read the step-4 pair tables."""
 
 from __future__ import annotations
 

@@ -1,23 +1,4 @@
-"""SonicParanoid adapter.
-
-SonicParanoid is a Python package with compiled extensions, installed into a
-private directory under its own tool directory rather than into the environment
-SuppOrth runs in.
-
-It is installed with ``pip --target`` rather than into a virtualenv, because it
-decides where to look for its helper binaries by inspecting its own
-interpreter. Given a conda-style interpreter it takes them from ``PATH``, which
-is exactly what the shared bin provides. Otherwise it insists on finding
-specific versions inside its own package directory -- blastp 2.15.0+, DIAMOND
-2.1.9, MMseqs2 13.45111 -- and on macOS exits rather than adapting when they
-differ. A virtualenv would mask the interpreter's origin and force that second
-path, so the interpreter is used directly and only the packages are private.
-
-Its search step is MMseqs2, which is deliberately different from OrthoFinder's
-BLAST and Broccoli's DIAMOND: the three agreeing then reflects three searches,
-not one search counted three times. It does not run IQ-TREE; phylogenetic
-content is Pfam domain architecture on an InParanoid-style graph.
-"""
+"""Build SonicParanoid from source in a private package prefix. A conda-style interpreter lets upstream resolve helper binaries from PATH."""
 
 from __future__ import annotations
 
@@ -40,8 +21,7 @@ class SonicParanoid(Adapter):
     name = "sonicparanoid"
     label = "S"
     repo = "https://gitlab.com/salvo981/sonicparanoid2.git"
-    # Upstream tags mix two naming schemes and v3.2.0 is a misnamed 2020 tag,
-    # so the newest-looking tag is not the newest release. 2.0.9 is master HEAD.
+    # Pin the tested source release.
     default_ref = "2.0.9"
     entrypoint_candidates = (
         "site-packages/bin/sonicparanoid",
@@ -68,8 +48,7 @@ class SonicParanoid(Adapter):
     PFAM_BASENAME = "pfama.mmseqs"
     # Every file SonicParanoid demands before it will use a profile database.
     # It checks these itself and deletes the whole directory when one is
-    # absent, so an incomplete set is not a partial win: it is a silent
-    # multi-hour rebuild.
+    # absent; validate the complete set before adoption.
     PFAM_DATABASE_FILES = (
         "",
         ".dbtype",
@@ -112,12 +91,7 @@ class SonicParanoid(Adapter):
         return [name for name in self.pfam_files() if not (source / name).is_file()]
 
     def resolve_pfam_source(self, source: Path) -> Path:
-        """The profile database directory a user meant, once verified complete.
-
-        Raises rather than returning a partial answer: adopting an incomplete
-        set would not fail here but would make SonicParanoid delete it and
-        start the multi-hour rebuild we are trying to avoid, unattended.
-        """
+        """Locate a complete profile database, rejecting missing files."""
         source = source.expanduser().resolve()
         if source.name != "profile_db" and (source / "profile_db").is_dir():
             source = source / "profile_db"
@@ -140,11 +114,7 @@ class SonicParanoid(Adapter):
         return source
 
     def pfam_source_problem(self, source: Path) -> str | None:
-        """Why a candidate database is unusable, or None when it is fine.
-
-        Lets a caller reject a wrong path before spending anything on the
-        install it was meant to shorten.
-        """
+        """Return a validation error for the profile database, or None."""
         try:
             self.resolve_pfam_source(source)
         except AdapterError as error:
@@ -152,16 +122,13 @@ class SonicParanoid(Adapter):
         return None
 
     def adopt_pfam_profiles(self, root: Path, source: Path, *, log=print) -> None:
-        """Take an already-indexed profile database from elsewhere.
-
-        Indexing costs hours, so a database built on another machine is worth
-        reusing.
-
-        Note that this cannot verify the index matches the MMseqs2 build that
-        will read it. That only shows up when a search runs.
-        """
+        """Hardlink or copy a complete indexed database. Index compatibility is checked by the subsequent MMseqs2 search."""
         source = self.resolve_pfam_source(source)
         destination = self.profile_db(root)
+        if source == destination.resolve():
+            (destination / self.PFAM_MARKER).write_text(f"adopted from {source}\n")
+            log(f"  using the existing PfamA profile DB at {source}")
+            return
         if destination.exists():
             shutil.rmtree(destination)
         destination.mkdir(parents=True)
@@ -173,8 +140,7 @@ class SonicParanoid(Adapter):
                 os.link(source / name, target)
                 linked += 1
             except OSError:
-                # Hardlinks fail across filesystems; the files are large enough
-                # that it is worth trying before falling back to copying.
+                # Cross-filesystem hardlinks require a copy.
                 shutil.copyfile(source / name, target)
 
         how = "hardlinked" if linked == len(self.pfam_files()) else "copied"
@@ -189,14 +155,7 @@ class SonicParanoid(Adapter):
         threads: int | None = None,
         log=print,
     ) -> None:
-        """Extract and index the bundled PfamA profile database.
-
-        The profiles ship inside the package as an archive; what takes time is
-        indexing them with MMseqs2. SonicParanoid does that lazily on its first
-        analysis, which makes that run look like it has hung for a quarter of
-        an hour with no way to tell the difference. Doing it here puts the cost
-        where a user expects to wait.
-        """
+        """Extract and index the bundled Pfam profiles before the first analysis."""
         profile_db = self.profile_db(root)
         if self.pfam_ready(root):
             log("  PfamA profile DB already prepared")
@@ -230,10 +189,7 @@ class SonicParanoid(Adapter):
         ready, detail = super().check(options)
         if not ready:
             return ready, detail
-        try:
-            root = self.installed_root()
-        except Exception:  # noqa: BLE001 - super().check already reported this
-            return ready, detail
+        root = self.installed_root()
         if not self.pfam_ready(root):
             return False, (
                 "PfamA profile DB not indexed; domain-aware orthology cannot run "
@@ -243,12 +199,7 @@ class SonicParanoid(Adapter):
         return ready, detail
 
     def pfam_ready(self, root: Path) -> bool:
-        """Whether the profile database is complete enough to be used.
-
-        A partial index is worse than none: SonicParanoid deletes the whole
-        profile directory and starts over when any index file is missing, so
-        the presence of some of them says nothing about readiness.
-        """
+        """Require the completion marker and every database and index file."""
         profile_db = self.profile_db(root)
         if not (profile_db / self.PFAM_MARKER).exists():
             return False

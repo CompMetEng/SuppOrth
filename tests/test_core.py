@@ -1013,3 +1013,29 @@ def test_pipeline_reports_missing_predictors_before_running(tmp_path, proteomes,
 
     with pytest.raises(pipeline.PipelineError, match="not ready"):
         pipeline.run_pipeline(config, log=lambda *_: None)
+
+
+def test_alignment_none_ignores_existing_orthofinder_tables(tmp_path, proteomes, monkeypatch):
+    sp1, sp2 = proteomes
+    outdir = tmp_path / 'out'
+    _write_orthofinder_search(outdir / 'work' / 'orthofinder')
+    monkeypatch.setattr(pipeline, 'resolve', lambda _: [StubAdapter()])
+    config = pipeline.RunConfig(
+        fastas=(sp1.fasta, sp2.fasta), outdir=outdir, alignment='none', support_lv=1,
+    )
+    outcome = pipeline.run_pipeline(config, log=lambda *_: None)
+    assert outcome['table']['Identity'].isna().all()
+
+
+def test_failed_oma_import_is_recorded(tmp_path, proteomes, monkeypatch):
+    sp1, sp2 = proteomes
+    monkeypatch.setattr(pipeline, 'resolve', lambda _: [StubAdapter()])
+    config = pipeline.RunConfig(
+        fastas=(sp1.fasta, sp2.fasta), outdir=tmp_path / 'out', alignment='none',
+        support_lv=1, oma=tmp_path / 'missing-oma',
+    )
+    outcome = pipeline.run_pipeline(config, log=lambda *_: None)
+    assert outcome['output'].exists()
+    assert outcome['reports'][-1].tool == 'oma'
+    assert outcome['reports'][-1].status == 'failed'
+    assert outcome['provenance']['predictors'][-1]['status'] == 'failed'

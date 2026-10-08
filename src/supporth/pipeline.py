@@ -1,13 +1,4 @@
-"""Sequential execution of the predictors and assembly of the consensus.
-
-The predictors run one after another rather than in parallel. Each of them
-already saturates the machine and expects to manage its own threads, so
-overlapping them mostly produces contention and unreliable timings.
-
-Two consequences of long runtimes shape this module: every predictor is checked
-for readiness *before* the first one starts, and every completed stage writes
-its canonical result to disk so ``--resume`` never repeats finished work.
-"""
+"""Run predictors sequentially, import OMA output and write the consensus."""
 
 from __future__ import annotations
 
@@ -20,7 +11,7 @@ from typing import Callable
 
 import pandas as pd
 
-from . import canonical, consensus, deps, figures, manifest, paths, similarity, shell
+from . import canonical, consensus, figures, manifest, paths, similarity, shell
 from .adapters import Adapter, StageContext, resolve
 from .adapters.oma import OMA
 from .adapters.orthofinder import find_alignment_dir
@@ -137,7 +128,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         try:
             native_root = adapter.run(context)
             result = adapter.parse(native_root, proteomes)
-        except Exception as error:  # noqa: BLE001 - one predictor must not sink the run
+        except Exception as error:  # noqa: BLE001 - retain completed stages after a predictor failure
             elapsed = time.monotonic() - stage_started
             log(f"  FAILED after {elapsed / 60:.1f} min: {error}")
             log(f"  log: {context.log}")
@@ -180,9 +171,9 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
 
     if config.oma:
         oma_result, oma_report = _ingest_oma(config, proteomes, outdir, log)
+        reports.append(oma_report)
         if oma_result is not None:
             results.append(oma_result)
-            reports.append(oma_report)
 
     if not results:
         raise PipelineError(
@@ -191,11 +182,11 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         )
 
     log("\nAlignment statistics")
-    if alignment_dir is not None:
-        log(f"  reading OrthoFinder {config.alignment} tables")
-        index = similarity.index_from_orthofinder(alignment_dir, proteomes, log=log)
-    elif config.alignment == "none":
+    if config.alignment == "none":
         index = similarity.SimilarityIndex()
+    elif alignment_dir is not None:
+        log("  reading OrthoFinder alignment tables")
+        index = similarity.index_from_orthofinder(alignment_dir, proteomes, log=log)
     else:
         log(f"  OrthoFinder did not write alignment tables; running {config.alignment}")
         index = similarity.build_index(
@@ -286,7 +277,7 @@ def _ingest_oma(
     started = time.monotonic()
     try:
         result = adapter.parse(source, proteomes)
-    except Exception as error:  # noqa: BLE001 - OMA must not sink the other tools
+    except Exception as error:  # noqa: BLE001 - retain other predictions if the import fails
         elapsed = time.monotonic() - started
         log(f"  FAILED: {error}")
         return None, StageReport(
@@ -327,11 +318,7 @@ def _preflight(
     tool_options: dict[str, list[str]],
     log: Callable[[str], None],
 ) -> None:
-    """Fail before the first long run rather than after it.
-
-    Checked against the options this run will actually use, so selecting a
-    tree method whose binary is absent is caught now rather than hours in.
-    """
+    """Check predictor dependencies before starting any stages."""
     log("\nChecking predictors")
     problems = []
     for adapter in adapters:
@@ -382,6 +369,7 @@ def _provenance(
             "tools": config.tools,
             "threads": threads,
             "alignment": config.alignment,
+            "tool_options": config.tool_options,
             "support_lv": config.support_lv,
             "identity_filter": config.identity_filter,
             "oma": str(config.oma) if config.oma else None,

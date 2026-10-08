@@ -1,15 +1,4 @@
-"""Building the consensus table from several predictor results.
-
-Each predictor has its own 0/1 column (the tool name), so a table can be
-filtered without parsing a string. ``SupportedBy`` records the same set as a
-comma-separated list of short labels (``F,S,B,O``), for a compact agreement
-pattern.
-
-Two cautions belong with any use of these numbers. Support is not a
-probability, and the predictors are not independent observers — they share
-inputs and, in part, algorithmic lineage. Treat a high count as a filter that
-trades recall for precision, not as a calibrated confidence.
-"""
+"""Combine predictor pair sets into a table with support flags and alignment statistics."""
 
 from __future__ import annotations
 
@@ -149,13 +138,7 @@ def collapse_to_genes(
     *,
     conservative: bool = True,
 ) -> pd.DataFrame:
-    """Collapse isoform-level pairs to gene-level pairs.
-
-    ``conservative`` reports the *minimum* support across the isoform pairs of a
-    gene pair as the headline number, with the maximum kept alongside. Taking
-    the maximum alone lets one lucky isoform hit from one predictor present a
-    gene pair as strongly supported, which flatters the result.
-    """
+    """Group isoform pairs by gene pair. Conservative mode reports minimum support; maximum support and predictor unions are retained separately."""
     prot2gene1 = _load_mapping(map1)
     prot2gene2 = _load_mapping(map2)
 
@@ -230,11 +213,7 @@ def filter_table(
     require: Iterable[str] = (),
     max_evalue: float | None = None,
 ) -> pd.DataFrame:
-    """Keep pairs with enough independent calls, or a strong alignment.
-
-    Default is support ≥ 3, or identity strictly above 80% when fewer tools
-    agree. Missing identities never satisfy the identity side of that or.
-    """
+    """Keep pairs meeting the support threshold or exceeding the identity threshold."""
     out = frame
     high_support = out["Lv_support"] >= support_lv
     aligned = out["Identity"].notna() & (out["Identity"] > identity_filter)

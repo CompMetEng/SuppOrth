@@ -1,22 +1,4 @@
-"""OrthoFinder adapter.
-
-Reference implementation for the adapter contract. OrthoFinder is the most
-awkward of the three to wrap, for two reasons worth knowing about:
-
-* it writes into a date-stamped ``Results_<Mmmdd>`` directory, and refuses to
-  reuse an existing output directory, so output is located by search rather than
-  by an assumed path;
-* the pairwise orthologue tables live in ``Orthologues/`` and are the file we
-  want, not ``Orthogroups.tsv`` — an orthogroup is a cluster, and expanding a
-  cluster into all cross-species pairs is a weaker claim. The orthogroup table
-  is used only as a fallback, and the result records which was read;
-* its sequence search is single-threaded per job and parallelised by job count,
-  which collapses to four jobs for a two-species comparison. See ``of_config``
-  for how the thread count is restored.
-
-OrthoFinder is GPL-licensed: it is fetched from upstream at install time and
-invoked as a subprocess, never vendored into this repository.
-"""
+"""Run OrthoFinder and read its pairwise orthologue tables. Orthogroup-only output is marked as a fallback."""
 
 from __future__ import annotations
 
@@ -60,15 +42,7 @@ def _split_genes(cell: str) -> list[str]:
 
 @dataclass
 class Methods:
-    """OrthoFinder's method choices, as configured for one run.
-
-    Sequence search is BLAST or DIAMOND, chosen with ``--alignment``
-    (OrthoFinder ``-S``). The rest of the default stack is MCL → MAFFT →
-    IQ-TREE → gene-tree reconciliation (``-M msa -T iqtree``). Broccoli and
-    SonicParanoid do not pick the aligner; they reuse this search when they
-    can, or keep their own method when they cannot. ``dendroblast`` or
-    ``-T fasttree`` are opt-in via ``--opt``.
-    """
+    """OrthoFinder search, alignment and tree methods for one run."""
 
     search: str = ORTHOFINDER.search
     mode: str = "msa"
@@ -132,12 +106,7 @@ class OrthoFinder(Adapter):
     tree_method = "msa"
 
     def post_install(self, root: Path, *, interpreter: Path | None = None, log=print) -> None:
-        """Give OrthoFinder its own interpreter.
-
-        It imports numpy and scipy at start-up. Those are heavy and version
-        sensitive, so they go in a private virtualenv rather than becoming
-        dependencies of SuppOrth itself.
-        """
+        """Install numpy and scipy in the predictor virtualenv."""
         self.build_venv(root, interpreter, ("numpy", "scipy"), log=log)
 
     def _interpreter(self, root: Path) -> str:
@@ -162,11 +131,11 @@ class OrthoFinder(Adapter):
     def method_profile(self, context: StageContext) -> MethodProfile:
         methods = parse_methods(context.options)
         program = methods.search or self.search_program
-        jobs = of_config.search_job_count(len(context.proteomes))
+        jobs = of_config.search_job_count(len(context.proteomes), double_blast="-1" not in context.options)
         return MethodProfile(
             search=f"{program} (via OrthoFinder)",
             clustering="MCL on the similarity graph",
-            alignment=methods.aligner or ("none" if methods.mode != "msa" else ORTHOFINDER.alignment),
+            alignment=(methods.aligner or ORTHOFINDER.alignment) if methods.mode == "msa" else "none",
             tree=methods.tree_program,
             orthology=ORTHOFINDER.orthology if methods.mode == "msa" else "dendroblast graph clustering",
             extra={
@@ -191,7 +160,7 @@ class OrthoFinder(Adapter):
         methods = parse_methods(context.options)
         requested = methods.search or self.search_program
 
-        jobs = of_config.search_job_count(len(context.proteomes))
+        jobs = of_config.search_job_count(len(context.proteomes), double_blast="-1" not in context.options)
         per_job = of_config.threads_per_job(context.threads, jobs)
 
         with of_config.config_lock(root):
@@ -235,26 +204,8 @@ class OrthoFinder(Adapter):
             )
 
         if result.returncode != 0:
-            self._salvage_or_fail(output, argv, result.returncode, context)
+            raise shell.CommandFailed(argv, result.returncode, context.log)
         return output
-
-    def _salvage_or_fail(self, output: Path, argv, returncode: int, context: StageContext) -> None:
-        """Keep usable output from a run that ended badly.
-
-        OrthoFinder can complete the search and orthogroup stages and then fail
-        during tree inference — on small datasets it raises an UnboundLocalError
-        there and reports it as running out of memory. The orthogroups it already
-        wrote are still worth having, so a non-zero exit is only fatal when
-        nothing parseable was produced.
-        """
-        salvageable = self._pairwise_tables(output) or self._orthogroups_table(output)
-        if not salvageable:
-            raise shell.CommandFailed(argv, returncode, context.log)
-        with context.log.open("a") as handle:
-            handle.write(
-                f"\n# SuppOrth: OrthoFinder exited {returncode} but left parseable "
-                f"output; continuing with what it produced.\n"
-            )
 
     def _configure_search(self, root: Path, program: str, threads_per_search: int) -> str:
         """Register a thread-aware copy of the search method and return its name."""

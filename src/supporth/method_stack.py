@@ -1,25 +1,4 @@
-"""Why several predictors, and how they are kept from duplicating one another.
-
-The four tools are not four copies of the same search. They were chosen because
-they stand for different ways of calling an orthologue: graph inference from
-sequence similarity (Broccoli, SonicParanoid), gene-tree reconciliation after
-an alignment and a tree (OrthoFinder in MSA mode), and evolutionary-distance
-consistency (OMA). OrthoFinder's BLAST or DIAMOND search is chosen with
-``--alignment`` and reused for the consensus identity columns. SonicParanoid
-searches with MMseqs2. OMA uses its own Smith-Waterman.
-
-SuppOrth then scores a pair by how many of those independent calls recovered
-it. That is a filter, not a probability: the tools share input sequences and
-some algorithmic ancestry, so a high count is "several methods said so", not
-a calibrated confidence.
-
-OMA is not launched here; the profile below is what a typical standalone run
-uses, recorded when the user points ``--oma`` at an existing result.
-
-SonicParanoid 2 does not call IQ-TREE. Its phylogenetic content is
-domain-architecture (Pfam) analysis on top of an InParanoid-style graph. The
-tree column therefore stays empty rather than claiming a program it never runs.
-"""
+"""Default method descriptions for the supported predictors. OMA is imported from an external run."""
 
 from __future__ import annotations
 

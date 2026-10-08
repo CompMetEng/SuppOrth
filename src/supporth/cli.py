@@ -1,20 +1,9 @@
-"""Command-line interface.
-
-Three verbs for the work itself:
-
-    suppOrth install      set up the shared binaries and the predictors
-    suppOrth check        report what is installed and whether it runs
-    suppOrth run          run every predictor on the proteomes, emit a consensus
-
-and two for the installation, which is large enough to need looking after:
-
-    suppOrth audit        find helper binaries duplicated inside the predictors
-    suppOrth disk         report disk usage and reclaim leftovers
-"""
+"""Command-line entry points for installation, execution and maintenance."""
 
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -28,7 +17,7 @@ def _identity_filter(value: str) -> float:
         percent = float(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError("identity_filter must be a number") from error
-    if percent < 0 or percent > 100:
+    if not 0 <= percent <= 100:
         raise argparse.ArgumentTypeError("identity_filter must be between 0 and 100")
     return percent
 
@@ -147,8 +136,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     refs = _key_values(args.ref)
     adopt = {k: Path(v) for k, v in _key_values(args.adopt).items()}
 
-    # Validated before anything is fetched or compiled: a mistyped path should
-    # cost seconds, not the rebuild it was meant to replace.
+    # Validate the profile database before downloading or compiling tools.
     if args.pfam_db:
         capable = [a for a in selected if hasattr(a, "adopt_pfam_profiles")]
         if not capable:
@@ -190,11 +178,10 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     pythons = _tool_paths(args.python)
 
+    failed = []
     for adapter in selected:
         print(f"\n{adapter.name}")
         extras = {}
-        # Routed by capability rather than by name, so the flag reaches whichever
-        # predictors can use a prebuilt profile database.
         if args.pfam_db and hasattr(adapter, "adopt_pfam_profiles"):
             extras["pfam_db"] = args.pfam_db
         try:
@@ -206,9 +193,16 @@ def cmd_install(args: argparse.Namespace) -> int:
                 log=print,
                 **extras,
             )
+            ready, detail = adapter.check()
+            if not ready:
+                raise RuntimeError(detail)
         except Exception as error:  # noqa: BLE001 - report and continue to the next tool
+            failed.append(adapter.name)
             print(f"  install failed: {error}", file=sys.stderr)
 
+    if failed:
+        print(f"\nInstallation failed for: {', '.join(failed)}", file=sys.stderr)
+        return 1
     print("\nDone. Verify with: suppOrth check")
     return 0
 
@@ -276,7 +270,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     tool_options: dict[str, list[str]] = {}
     for tool, argument_string in _key_values(args.opt).items():
-        tool_options[tool] = argument_string.split()
+        try:
+            tool_options[tool] = shlex.split(argument_string)
+        except ValueError as error:
+            print(f"error: invalid options for {tool}: {error}", file=sys.stderr)
+            return 2
 
     config = RunConfig(
         fastas=tuple(fastas),
@@ -294,14 +292,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     try:
-        run_pipeline(config)
+        outcome = run_pipeline(config)
     except (PipelineError, ProteomeError) as error:
         print(f"\nerror: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("\ninterrupted; completed stages can be reused with --resume", file=sys.stderr)
         return 130
-    return 0
+    return 1 if any(report.status == "failed" for report in outcome["reports"]) else 0
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -395,7 +393,11 @@ def main(argv: list[str] | None = None) -> int:
         "disk": cmd_disk,
         "tools": cmd_tools,
     }
-    return handlers[args.command](args)
+    try:
+        return handlers[args.command](args)
+    except KeyError as error:
+        print(f"error: {error.args[0]}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -1,18 +1,4 @@
-"""The contract every predictor adapter implements.
-
-Four operations, deliberately small, so that adding a predictor is a new module
-rather than a change to the pipeline:
-
-``install``  fetch the tool from upstream at a pinned ref and record the commit
-``check``    confirm it can actually start, before a long run is attempted
-``run``      execute it on a staged input directory
-``parse``    convert its native output into the canonical pair set
-
-Installation is from the upstream repository rather than a packaged build,
-because packaged builds of these tools are frequently broken or lag behind, and
-because fetching at install time keeps differently-licensed sources out of this
-repository.
-"""
+"""Common interface for installing, checking, running and parsing predictors."""
 
 from __future__ import annotations
 
@@ -37,12 +23,7 @@ class NotInstalled(AdapterError):
 
 @dataclass
 class MethodProfile:
-    """The methodological choices a predictor was run with.
-
-    Recorded per run because it is the substance of the consensus: agreement
-    between predictors means more when they searched, aligned, built trees and
-    clustered differently.
-    """
+    """Methods recorded for one predictor stage."""
 
     search: str = "unspecified"
     clustering: str = "unspecified"
@@ -175,13 +156,7 @@ class Adapter(ABC):
     install_notes: str = ""
 
     def _collapse_bundled(self, root: Path, *, log=print) -> None:
-        """Point this predictor's bundled helpers at the shared binaries.
-
-        Done at install time for predictors that prepend their own bin
-        directory to PATH, because for those the shared layer would otherwise
-        be ignored. It also disarms binaries built for another platform, which
-        source distributions routinely carry.
-        """
+        """Link helpers that would otherwise shadow the shared binary directory."""
         from .. import deps
 
         bundled = [b for b in deps.find_bundled({self.name: root}) if not b.linked]
@@ -199,12 +174,7 @@ class Adapter(ABC):
         """Hook for tools needing a build step or Python dependencies."""
 
     def leftovers(self, root: Path) -> list[tuple[Path, str]]:
-        """Artefacts this predictor abandoned, as ``(path, reason)`` pairs.
-
-        Only the adapter can recognise a half-finished artefact belonging to
-        its own tool, so the disk report asks each predictor instead of
-        guessing from file names it does not understand.
-        """
+        """Return unused files or directories with their cleanup descriptions."""
         return []
 
     def select_interpreter(self, explicit: Path | str | None = None, *, log=print) -> Path:
@@ -225,15 +195,7 @@ class Adapter(ABC):
         *,
         log=print,
     ) -> Path:
-        """Install the predictor into a private directory with ``pip --target``.
-
-        An alternative to a virtualenv for predictors that inspect their own
-        interpreter. A virtualenv would make the interpreter look like it came
-        from the virtualenv rather than from wherever it was borrowed, which
-        changes how some tools decide where to find their helper binaries. Here
-        the interpreter keeps its identity and only the packages are private,
-        so the borrowed environment is still never written to.
-        """
+        """Install source into a private pip target while retaining the selected interpreter."""
         target = root / "site-packages"
         target.mkdir(parents=True, exist_ok=True)
         log(f"  installing into {target.name}/ with pip (this compiles extensions)")
@@ -265,11 +227,7 @@ class Adapter(ABC):
         editable_source: bool = False,
         log=print,
     ) -> Path:
-        """Create the predictor's private virtualenv and pip-install into it.
-
-        Only pip is used, and only inside this virtualenv, so an interpreter
-        borrowed from an existing environment is never written to.
-        """
+        """Create a private virtualenv and install dependencies with pip."""
         venv = root / ".venv"
         python = interpreter or Path(self.python())
         if not (venv / "bin" / "python").exists():

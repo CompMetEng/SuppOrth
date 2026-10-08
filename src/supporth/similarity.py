@@ -1,19 +1,10 @@
-"""Identity, e-value and bit score for the consensus table.
-
-These columns come from the BLAST or DIAMOND all-versus-all OrthoFinder
-already ran (``--alignment``). A second search is started only when
-OrthoFinder was not part of the run.
-
-Both directions are read and the better hit per unordered pair is kept.
-A pair with no hit is reported as missing rather than as zero identity.
-"""
+"""Read alignment statistics from OrthoFinder or run a separate BLAST/DIAMOND search."""
 
 from __future__ import annotations
 
 import gzip
 from dataclasses import dataclass
 from collections.abc import Sequence
-from itertools import permutations
 from pathlib import Path
 
 from . import shell
@@ -73,16 +64,7 @@ def index_from_orthofinder(
     *rest: Proteome,
     log=print,
 ) -> SimilarityIndex:
-    """Reuse the all-vs-all search OrthoFinder has already performed.
-
-    OrthoFinder keeps its raw alignment tables in ``WorkingDirectory``, keyed
-    by internal identifiers such as ``0_1474``. Reading them takes seconds
-    where repeating the search on a large pair takes hours, so an existing run
-    is worth adopting when one is at hand.
-
-    Only the cross-species tables are read. The within-species ones describe
-    paralogues, which the consensus table has no column for.
-    """
+    """Read cross-species search tables and translate OrthoFinder sequence identifiers."""
     loaded = as_proteomes(proteomes, *rest)
     work_dir = Path(work_dir).expanduser()
     if (work_dir / "WorkingDirectory").is_dir():
@@ -94,7 +76,7 @@ def index_from_orthofinder(
         for proteome in loaded:
             if filename == proteome.fasta.name or filename == f"{proteome.label}.fasta":
                 wanted[index] = proteome
-    if len(wanted) < 2:
+    if len(wanted) != len(loaded):
         names = ", ".join(p.label for p in loaded)
         raise ValueError(
             f"{work_dir / 'SpeciesIDs.txt'} lists {sorted(species.values())}, which does "
@@ -162,11 +144,9 @@ def _load_orthofinder_table(
             subject = names.get(fields[1])
             if query is None or subject is None:
                 continue
-            # BLAST tabular format 6, whose last two columns are the e-value and
-            # the bit score. Read from the end so a table carrying extra columns
-            # is still understood.
+            # Standard BLAST format 6: identity, e-value and bit score.
             try:
-                hit = Hit(float(fields[2]), float(fields[-2]), float(fields[-1]))
+                hit = Hit(float(fields[2]), float(fields[10]), float(fields[11]))
             except ValueError:
                 continue
             index.add(query, subject, hit)
@@ -195,21 +175,44 @@ def build_index(
 
     if program == "none":
         return index
+    if program not in {"diamond", "blast"}:
+        raise ValueError(f"unsupported alignment program: {program}")
 
     runner = _diamond if program == "diamond" else _blastp
-    for query, subject in permutations(loaded, 2):
-        tag = f"{query.label}__{subject.label}"
-        output = work_dir / f"{tag}.tsv"
-        if not output.exists():
+    for subject in loaded:
+        database = _make_database(subject, work_dir, threads, program)
+        for query in loaded:
+            if query is subject:
+                continue
+            tag = f"{query.label}__{subject.label}"
+            output = work_dir / f"{tag}.tsv"
             log(f"  {program} {query.label} vs {subject.label}")
-            runner(query, subject, work_dir, output, threads, evalue, max_targets, tag)
-        index.load_tabular(output)
+            runner(query, database, work_dir, output, threads, evalue, max_targets, tag)
+            index.load_tabular(output)
     return index
+
+
+def _make_database(subject: Proteome, work_dir: Path, threads: int, program: str) -> Path:
+    """Build one database per subject proteome for this alignment run."""
+    database = work_dir / subject.label
+    if program == "diamond":
+        binary = shell.which("diamond")
+        if binary is None:
+            raise RuntimeError("diamond not available in the shared bin")
+        argv = [binary, "makedb", "--in", str(subject.fasta), "-d", str(database),
+                "--threads", str(threads), "--quiet"]
+    else:
+        binary = shell.which("makeblastdb")
+        if binary is None:
+            raise RuntimeError("makeblastdb not available in the shared bin")
+        argv = [binary, "-in", str(subject.fasta), "-dbtype", "prot", "-out", str(database)]
+    shell.run(argv, log=work_dir / f"{subject.label}.makedb.log", threads=threads)
+    return database
 
 
 def _diamond(
     query: Proteome,
-    subject: Proteome,
+    database: Path,
     work_dir: Path,
     output: Path,
     threads: int,
@@ -221,22 +224,6 @@ def _diamond(
     if binary is None:
         raise RuntimeError("diamond not available in the shared bin")
 
-    database = work_dir / f"{tag}.dmnd"
-    shell.run(
-        [
-            binary,
-            "makedb",
-            "--in",
-            str(subject.fasta),
-            "-d",
-            str(database),
-            "--threads",
-            str(threads),
-            "--quiet",
-        ],
-        log=work_dir / f"{tag}.makedb.log",
-        threads=threads,
-    )
     shell.run(
         [
             binary,
@@ -265,7 +252,7 @@ def _diamond(
 
 def _blastp(
     query: Proteome,
-    subject: Proteome,
+    database: Path,
     work_dir: Path,
     output: Path,
     threads: int,
@@ -273,16 +260,9 @@ def _blastp(
     max_targets: int,
     tag: str,
 ) -> None:
-    makedb = shell.which("makeblastdb")
     blastp = shell.which("blastp")
-    if makedb is None or blastp is None:
-        raise RuntimeError("blastp/makeblastdb not available in the shared bin")
-
-    database = work_dir / f"{tag}_db"
-    shell.run(
-        [makedb, "-in", str(subject.fasta), "-dbtype", "prot", "-out", str(database)],
-        log=work_dir / f"{tag}.makedb.log",
-    )
+    if blastp is None:
+        raise RuntimeError("blastp not available in the shared bin")
     shell.run(
         [
             blastp,

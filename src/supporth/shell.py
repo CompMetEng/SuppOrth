@@ -1,10 +1,4 @@
-"""Subprocess execution with a controlled environment and persistent logs.
-
-Predictors are launched with the shared bin directory prepended to ``PATH``.
-That is the only mechanism guaranteed to work for all three predictors: some
-accept explicit flags for their helper binaries, some only look them up on
-``PATH``, and those flags change between versions.
-"""
+"""Run subprocesses with shared helper binaries and stage logs."""
 
 from __future__ import annotations
 
@@ -46,19 +40,14 @@ def tool_env(
     *,
     threads: int | None = None,
 ) -> dict[str, str]:
-    """Environment in which the shared binaries take precedence.
-
-    ``threads`` sets the OpenMP thread limit. It is left alone when not given:
-    pinning it to 1 silently caps every OpenMP-aware binary at a single core,
-    which is the opposite of what a run on a big machine wants.
-    """
+    """Put shared binaries first on PATH and optionally set the OpenMP thread limit."""
     import os
 
     env = dict(os.environ)
     bin_dir = str(paths.shared_bin())
     current = env.get("PATH", "")
-    if bin_dir not in current.split(":"):
-        env["PATH"] = f"{bin_dir}:{current}" if current else bin_dir
+    entries = [entry for entry in current.split(":") if entry != bin_dir]
+    env["PATH"] = ":".join([bin_dir, *entries])
     if threads is not None:
         env["OMP_NUM_THREADS"] = str(threads)
     if extra:
@@ -150,10 +139,10 @@ def platform_key() -> str:
     """Coarse platform identifier used to pick prebuilt release assets."""
     system = platform.system().lower()
     machine = platform.machine().lower()
-    if system == "linux":
-        return "linux-arm64" if machine in {"aarch64", "arm64"} else "linux-x86_64"
+    if machine in {"aarch64", "arm64"}:
+        machine = "arm64"
     if system == "darwin":
-        return "macos-arm64" if machine in {"arm64", "aarch64"} else "macos-x86_64"
+        system = "macos"
     return f"{system}-{machine}"
 
 
@@ -162,5 +151,5 @@ def cpu_count(requested: int | None = None) -> int:
 
     available = os.cpu_count() or 1
     if requested and requested > 0:
-        return min(requested, max(available, requested))
+        return requested
     return max(1, available - 1)

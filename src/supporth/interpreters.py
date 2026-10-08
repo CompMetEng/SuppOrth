@@ -1,22 +1,12 @@
-"""Choosing a Python interpreter for a predictor's private environment.
-
-SuppOrth cannot assume the interpreter it runs on suits every predictor:
-SonicParanoid 2.0.9 requires Python >=3.10,<3.13, while macOS still ships 3.9.
-Each adapter therefore declares what it needs, and an interpreter satisfying
-that is located before its virtualenv is built.
-
-Only the *interpreter* is borrowed. Packages are always installed with pip into
-a virtualenv SuppOrth owns, so an existing environment is never modified.
-"""
+"""Locate an existing Python interpreter compatible with a predictor. Packages are installed in a private venv or prefix."""
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Iterator
 
 from . import shell
 
@@ -36,7 +26,7 @@ ENV_ROOTS = (
     "~/.pyenv/versions",
 )
 
-SEARCH_MINOR_RANGE = range(14, 8, -1)  # 3.13 down to 3.9, newest first
+SEARCH_MINOR_RANGE = range(14, 8, -1)  # Versioned executable names, newest first.
 
 
 class InterpreterError(RuntimeError):

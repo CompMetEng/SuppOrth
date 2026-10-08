@@ -1,16 +1,4 @@
-"""Identifier-driven parsing of predictor output tables.
-
-The previous approach guessed which columns held gene identifiers, which broke
-whenever a tool changed its output. Now that SuppOrth supplies the input FASTAs
-it already knows every valid identifier, so a row can be read by asking which
-tokens *are* known genes and ignoring everything else — scores, group numbers,
-species names, bootstrap values and headers all fall away without needing a
-rule per tool or per version.
-
-The cost is that a row is read as "these species-1 genes relate to these
-species-2 genes", losing any internal structure such as seed-orthologue
-scoring. For a support-counting consensus that structure is not used anyway.
-"""
+"""Expand known protein identifiers in each table row into unique cross-species combinations."""
 
 from __future__ import annotations
 
@@ -32,14 +20,9 @@ def tokenize(line: str) -> list[str]:
 def pairs_from_table(
     path: Path,
     *id_sets: AbstractSet[str],
-    max_row_pairs: int = 100_000,
+    max_row_pairs: int | None = None,
 ) -> Iterator[tuple[str, str]]:
-    """Yield cross-species pairs found on each row of a predictor table.
-
-    Two identifier sets recover the original two-proteome behaviour. More than
-    two yield every cross-species combination on the row, oriented by the order
-    of the sets (the same order as the input FASTAs).
-    """
+    """Yield cross-species combinations in input order. An explicit row limit raises an error rather than dropping predictions."""
     if len(id_sets) < 2:
         raise ValueError("pairs_from_table needs at least two identifier sets")
 
@@ -49,10 +32,10 @@ def pairs_from_table(
             owner[gene] = index
 
     with Path(path).open(errors="replace") as handle:
-        for line in handle:
+        for line_number, line in enumerate(handle, start=1):
             if not line.strip() or line.startswith("#"):
                 continue
-            tokens = tokenize(line)
+            tokens = dict.fromkeys(tokenize(line))
             if not tokens:
                 continue
 
@@ -69,8 +52,11 @@ def pairs_from_table(
             species = sorted(by_species)
             for left_i, right_i in combinations(species, 2):
                 n_pairs += len(by_species[left_i]) * len(by_species[right_i])
-            if n_pairs > max_row_pairs:
-                continue
+            if max_row_pairs is not None and n_pairs > max_row_pairs:
+                raise ValueError(
+                    f"{path}:{line_number} contains {n_pairs} pairs, "
+                    f"exceeding the requested limit of {max_row_pairs}"
+                )
 
             for left_i, right_i in combinations(species, 2):
                 for left in by_species[left_i]:

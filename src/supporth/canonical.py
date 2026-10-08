@@ -1,11 +1,4 @@
-"""One canonical representation of a predictor's result.
-
-Every adapter converts its tool's native output into the same object: a set of
-ordered ``(protein_a, protein_b)`` pairs, with the protein from the earlier
-input FASTA first. Downstream code therefore never needs to know which tool
-produced a result, and the old split between pair-tuple sets and query-keyed
-dictionaries disappears.
-"""
+"""Store unique cross-species pairs, oriented by input proteome order."""
 
 from __future__ import annotations
 

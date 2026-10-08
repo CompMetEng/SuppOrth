@@ -1,10 +1,4 @@
-"""Protein-pair overlap figure written next to the consensus table.
-
-The layout matches the proposed output minus the gene-level Venn: a four-set
-(or fewer) Venn of protein pairs, a pairwise overlap heatmap, and a bar chart
-of pairs unique to one predictor. Gene collapse is a separate table; it is not
-plotted here.
-"""
+"""Plot unfiltered protein-pair overlaps as a Venn diagram, heatmap and exclusive-pair bars."""
 
 from __future__ import annotations
 
@@ -16,8 +10,7 @@ from typing import Callable, Sequence
 from .canonical import Pair, PredictorResult
 from .consensus import protein_columns, tool_flag_columns
 
-# Order and colours follow the proposed figure: OrthoFinder, Broccoli, OMA,
-# SonicParanoid. Unknown tools are appended after these.
+# Stable panel order; additional predictors are appended.
 PANEL_ORDER = ("orthofinder", "broccoli", "oma", "sonicparanoid")
 DISPLAY_NAME = {
     "orthofinder": "OrthoFinder",
