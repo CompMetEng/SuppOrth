@@ -18,13 +18,14 @@ then install its predictors:
 ```sh
 python3.10 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'git+https://github.com/fma91/SuppOrth.git@stand_alone'
+python -m pip install --pre supporth
 suppOrth install
 suppOrth check
 ```
 
-The first PyPI release is being prepared. Once published, replace the Git
-installation command with `python -m pip install --pre supporth`.
+SuppOrth is available on [PyPI](https://pypi.org/project/supporth/). The current
+release is a release candidate, so installation uses `--pre`. If you already
+have a suitable Python environment active, skip the first two commands.
 
 The predictors are installed from their source repositories under `~/.supporth`.
 You need Git and a compiler toolchain. MAFFT and FastME must already be available
