@@ -31,31 +31,25 @@ they are not calibrated probabilities.
 
 ## Installation
 
-SuppOrth supports macOS and Linux. The PyPI release is being prepared; until it
-is published, install from Git as shown below.
-
-Use an existing Python 3.10–3.12 interpreter to create an environment:
+SuppOrth supports macOS and Linux. Use an existing Python 3.10–3.12
+environment and install the application from PyPI:
 
 ```sh
-python3.10 -m venv .venv
-source .venv/bin/activate
+python -m pip install supporth  # Install the SuppOrth application
+suppOrth install               # Install predictors and prepare their dependencies
+suppOrth check                 # Report whether the installation is ready
+```
+
+To install the development branch from source instead:
+
+```sh
 python -m pip install 'git+https://github.com/fma91/SuppOrth.git@stand_alone'
-suppOrth install
-suppOrth check
 ```
 
-From a local checkout, use `python -m pip install .` instead of the Git command.
-
-Once the first PyPI release is published, the Git command can be replaced with:
-
-```sh
-python -m pip install --pre supporth
-```
-
-The first release is `0.4.0rc1`, a release candidate. Stable releases will use
-`python -m pip install supporth`. Both installations provide the `suppOrth` and
-`supporth` commands. The Python package does not bundle predictor repositories,
-external binaries or the Pfam database; use `suppOrth install` to prepare them.
+From a local checkout, use `python -m pip install .`. All installation methods
+provide the `suppOrth` and `supporth` commands. The Python package does not
+bundle predictor repositories, external binaries or the Pfam database;
+use `suppOrth install` to prepare them.
 
 `suppOrth install` installs all three predictors sequentially from their upstream
 repositories. OrthoFinder is pinned to `v2.5.5`, SonicParanoid2 to `2.0.9`, and

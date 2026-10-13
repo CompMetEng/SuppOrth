@@ -22,7 +22,7 @@ archive. Check installation in another environment, outside the checkout:
 
 ```sh
 python3.10 -m venv /tmp/supporth-wheel-check
-/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.0rc1-py3-none-any.whl
+/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.0-py3-none-any.whl
 /tmp/supporth-wheel-check/bin/python -m pip check
 /tmp/supporth-wheel-check/bin/suppOrth --version
 /tmp/supporth-wheel-check/bin/supporth run --help
@@ -42,9 +42,8 @@ python -m twine upload dist/*
 ```
 
 TestPyPI and PyPI are separate services. Confirm the TestPyPI metadata and files
-before uploading to PyPI. The first version is a release candidate, installed
-with `python -m pip install --pre supporth`. After publishing a stable version,
-update the README installation instructions to `python -m pip install supporth`.
+before uploading to PyPI. Stable releases are installed with
+`python -m pip install supporth`.
 
 The package name must be available or owned by your PyPI account. An apparent
 absence from the public index does not guarantee that PyPI will allow the name.
