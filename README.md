@@ -12,20 +12,17 @@ proteomes and keeps one-to-many and many-to-many relationships.
 
 ## Install
 
-Use Python 3.10–3.12 on macOS or Linux. Create an environment, install SuppOrth,
-then install its predictors:
+Use Python 3.10–3.12 on macOS or Linux. Install SuppOrth, then its predictors:
 
 ```sh
-python3.10 -m venv .venv
-source .venv/bin/activate
-python -m pip install --pre supporth
-suppOrth install
-suppOrth check
+python -m pip install --pre supporth  # Install the SuppOrth command-line application
+suppOrth install                     # Install the three predictors and prepare their dependencies
+suppOrth check                       # Check whether predictors and required binaries are ready
 ```
 
 SuppOrth is available on [PyPI](https://pypi.org/project/supporth/). The current
-release is a release candidate, so installation uses `--pre`. If you already
-have a suitable Python environment active, skip the first two commands.
+release, `0.4.0rc1`, is a release candidate. The `--pre` option allows pip to
+select prerelease versions.
 
 The predictors are installed from their source repositories under `~/.supporth`.
 You need Git and a compiler toolchain. MAFFT and FastME must already be available
