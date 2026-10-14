@@ -56,7 +56,10 @@ class OMA(Adapter):
             )
         raw: list[tuple[str, str]] = []
         for table in tables:
-            raw.extend(pairs_from_table(table, *id_sets(loaded)))
+            if table.name == "OrthologousGroups.txt":
+                raw.extend(pairs_from_table(table, *id_sets(loaded)))
+            else:
+                raw.extend(pairwise_pairs(table))
         return build_result(self.name, self.label, raw, loaded, source_files=tables)
 
     def result_tables(
@@ -93,3 +96,20 @@ class OMA(Adapter):
                 seen.add(path)
                 found.append(path)
         return sorted(found)
+
+
+def pairwise_pairs(path: Path) -> list[tuple[str, str]]:
+    """Read identifiers from the two protein-header columns, excluding descriptions."""
+    pairs = []
+    with Path(path).open(errors="replace") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            columns = line.rstrip("\r\n").split("\t")
+            if len(columns) < 4 or not columns[2].split() or not columns[3].split():
+                raise AdapterError(
+                    f"{path}:{line_number} is not an OMA PairwiseOrthologs row "
+                    "(expected entry numbers, then the two protein headers)"
+                )
+            pairs.append((columns[2].split()[0], columns[3].split()[0]))
+    return pairs

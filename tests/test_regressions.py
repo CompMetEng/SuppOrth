@@ -46,8 +46,8 @@ def test_large_rows_are_not_silently_dropped(tmp_path):
 def test_oma_direct_folder_and_mixed_filenames_keep_all_pairs(tmp_path):
     folder = tmp_path / 'PairwiseOrthologs'
     folder.mkdir()
-    (folder / 'a-b.txt').write_text('a1\tb1\n')
-    (folder / 'different_names.txt').write_text('a1\tc1\n')
+    (folder / 'a-b.txt').write_text('1\t1\ta1\tb1\t1:1\n')
+    (folder / 'different_names.txt').write_text('1\t1\ta1\tc1\t1:1\n')
     proteomes = tuple(Proteome(label, tmp_path / f'{label}.fa', frozenset({f'{label}1'}))
                       for label in ('a', 'b', 'c'))
     assert OMA().parse(folder, proteomes).pairs == {('a1', 'b1'), ('a1', 'c1')}
@@ -167,3 +167,96 @@ def test_adopting_the_installed_pfam_directory_preserves_it(tmp_path):
     adapter.adopt_pfam_profiles(tmp_path, database, log=lambda *_: None)
     assert adapter.pfam_ready(tmp_path)
     assert all((database / name).read_bytes() == b'profile data' for name in adapter.pfam_files())
+
+
+def test_cpu_default_respects_scheduler_affinity(monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, 'cpu_count', lambda: 64)
+    monkeypatch.setattr(os, 'sched_getaffinity', lambda _: {0, 1, 2, 3}, raising=False)
+    assert shell.cpu_count() == 3
+    assert shell.cpu_count(2) == 2
+
+
+def test_cpu_default_without_affinity(monkeypatch):
+    import os
+
+    monkeypatch.delattr(os, 'sched_getaffinity', raising=False)
+    monkeypatch.setattr(os, 'cpu_count', lambda: 4)
+    assert shell.cpu_count() == 3
+
+
+def test_sonicparanoid_install_passes_pandas_constraint(tmp_path, monkeypatch):
+    from pathlib import Path
+    from supporth.adapters.sonicparanoid import SonicParanoid
+
+    calls = []
+    monkeypatch.setattr(shell, 'run', lambda command, **kwargs: calls.append(command))
+    SonicParanoid().install_to_prefix(tmp_path, Path('/python'), log=lambda *_: None)
+    command = calls[0]
+    constraints = Path(command[command.index('--constraint') + 1])
+    assert constraints.read_text() == 'pandas<3\n'
+    assert command[-1] == '.'
+
+
+def test_failed_pfam_index_never_gets_ready_marker(tmp_path, monkeypatch):
+    from pathlib import Path
+    from supporth.adapters.base import AdapterError
+    from supporth.adapters.sonicparanoid import SonicParanoid
+
+    adapter = SonicParanoid()
+    monkeypatch.setattr(shell, 'run', lambda *args, **kwargs: None)
+    with pytest.raises(AdapterError, match='pfam-index.log'):
+        adapter.prepare_pfam_profiles(tmp_path, Path('/python'), threads=1, log=lambda *_: None)
+    assert not (adapter.profile_db(tmp_path) / adapter.PFAM_MARKER).exists()
+
+
+def test_support_threshold_warning_mentions_identity_exception():
+    messages = []
+    pipeline.warn_support_threshold(3, 2, messages.append)
+    assert 'identity exception' in messages[0]
+    messages.clear()
+    pipeline.warn_support_threshold(3, 3, messages.append)
+    assert messages == []
+
+
+def test_conda_detection_uses_interpreter_prefix(monkeypatch):
+    from supporth import interpreters
+
+    monkeypatch.setattr(shell, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout='/opt/micromamba/envs/orthology\n'))
+    assert interpreters.is_conda_style('/unrelated/python')
+    monkeypatch.setattr(shell, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout='/tmp/venv\n'))
+    assert not interpreters.is_conda_style('/opt/anaconda3/bin/python')
+
+
+@pytest.mark.parametrize('version, warns', [
+    ('13.45111', False),
+    ('45111b641859ed0ddd875b94d6fd1aef1a675b7e', False),
+    ('15.6f452', True),
+])
+def test_mmseqs_adoption_version_warning(tmp_path, monkeypatch, version, warns):
+    messages = []
+    monkeypatch.setattr(shell, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout=version, stderr=''))
+    deps._warn_version(deps.SPECS['mmseqs'], tmp_path / 'mmseqs', messages.append)
+    assert bool(messages) == warns
+
+
+def test_oma_numeric_entry_ids_and_unknown_headers_are_not_predictions(tmp_path):
+    table = tmp_path / 'pairs.txt'
+    table.write_text('1\t2\ta1\tb1 mentions 2\t1:1\n3\t4\tunknown\tb1\t1:1\n')
+    proteomes = (Proteome('a', tmp_path / 'a.fa', frozenset({'a1', '1'})),
+                 Proteome('b', tmp_path / 'b.fa', frozenset({'b1', '2'})))
+    result = OMA().parse(table, proteomes)
+    assert result.pairs == {('a1', 'b1')}
+    assert result.dropped_unknown == 1
+
+
+def test_oma_group_fallback_retains_its_separate_format(tmp_path):
+    table = tmp_path / 'OrthologousGroups.txt'
+    table.write_text('OMA1\ta1\tb1\n')
+    proteomes = (Proteome('a', tmp_path / 'a.fa', frozenset({'a1'})),
+                 Proteome('b', tmp_path / 'b.fa', frozenset({'b1'})))
+    assert OMA().parse(table, proteomes).pairs == {('a1', 'b1')}

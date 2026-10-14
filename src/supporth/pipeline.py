@@ -67,6 +67,14 @@ class StageReport:
     error: str = ""
 
 
+def warn_support_threshold(level: int, available: int, log: Callable[[str], None]) -> None:
+    if level > available:
+        log(
+            f"WARNING: --supportLv {level} exceeds the {available} available predictors; "
+            "only pairs passing the identity exception can be retained."
+        )
+
+
 def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     started = time.monotonic()
     paths.ensure_layout()
@@ -84,6 +92,8 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     threads = shell.cpu_count(config.threads or None)
 
     _preflight(adapters, config.tool_options, log)
+    selected_count = len(adapters) + int(config.oma is not None)
+    warn_support_threshold(config.support_lv, selected_count, log)
 
     input_dir = stage_input_dir(work_root / "input", proteomes)
 
@@ -180,6 +190,10 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             "no predictor produced a usable result; see the stage logs under "
             f"{work_root}"
         )
+
+    successful_count = len({result.tool for result in results})
+    if successful_count < selected_count:
+        warn_support_threshold(config.support_lv, successful_count, log)
 
     log("\nAlignment statistics")
     if config.alignment == "none":

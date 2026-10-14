@@ -149,7 +149,10 @@ def platform_key() -> str:
 def cpu_count(requested: int | None = None) -> int:
     import os
 
-    available = os.cpu_count() or 1
+    try:
+        available = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        available = os.cpu_count() or 1
     if requested and requested > 0:
         return requested
     return max(1, available - 1)

@@ -33,6 +33,8 @@ class SonicParanoid(Adapter):
     # 2.0.9 rejects anything outside this range, and macOS still ships 3.9.
     python_requires = ">=3.10,<3.13"
     prefers_conda_interpreter = True
+    # Pandas 3 exposes read-only arrays that the 2.0.9 Cython code cannot accept.
+    pip_constraints = ("pandas<3",)
     install_notes = (
         "installed with pip --target under the tool directory, using a borrowed "
         "interpreter so its helper binaries are taken from the shared bin; "
@@ -182,7 +184,13 @@ class SonicParanoid(Adapter):
                 log=root / "pfam-index.log",
                 timeout=None,
             )
-        profile_db.mkdir(parents=True, exist_ok=True)
+        missing = self.missing_pfam_files(profile_db)
+        if missing:
+            raise AdapterError(
+                f"indexing the PfamA profile DB failed; missing {', '.join(missing)} "
+                f"(see {root / 'pfam-index.log'} and "
+                f"{profile_db / 'log.obtain_precomputed_profiles.txt'})"
+            )
         (profile_db / self.PFAM_MARKER).write_text("prepared by suppOrth\n")
 
     def check(self, options: list[str] | None = None) -> tuple[bool, str]:

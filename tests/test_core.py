@@ -661,6 +661,27 @@ def test_oma_is_not_launched_and_reads_pairwise_tables(tmp_path, proteomes):
     assert result.pairs == {("a1", "b1"), ("a2", "b2")}
 
 
+def test_oma_ignores_identifiers_in_descriptions(tmp_path, proteomes):
+    from supporth.adapters.oma import OMA
+
+    sp1, sp2 = proteomes
+    run = tmp_path / "Output" / "PairwiseOrthologs"
+    run.mkdir(parents=True)
+    (run / "A-B.txt").write_text("1\t2\ta1 similar to b2\tb1 paralog of b2 and a2\t1:1\n")
+
+    assert OMA().parse(tmp_path / "Output", sp1, sp2).pairs == {("a1", "b1")}
+
+
+def test_oma_rejects_tables_without_protein_columns(tmp_path, proteomes):
+    from supporth.adapters.base import AdapterError
+    from supporth.adapters.oma import OMA
+
+    table = tmp_path / "pairs.txt"
+    table.write_text("a1\tb1\n")
+    with pytest.raises(AdapterError, match="not an OMA PairwiseOrthologs row"):
+        OMA().parse(table, *proteomes)
+
+
 def test_pipeline_ingests_user_supplied_oma(tmp_path, proteomes, monkeypatch):
     sp1, sp2 = proteomes
     oma_root = tmp_path / "oma" / "Output" / "PairwiseOrthologs"

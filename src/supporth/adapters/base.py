@@ -88,6 +88,7 @@ class Adapter(ABC):
     # Set when the predictor changes behaviour depending on whether its
     # interpreter belongs to a conda-style distribution.
     prefers_conda_interpreter: bool = False
+    pip_constraints: tuple[str, ...] = ()
 
     # ---- installation -------------------------------------------------
 
@@ -199,8 +200,13 @@ class Adapter(ABC):
         target = root / "site-packages"
         target.mkdir(parents=True, exist_ok=True)
         log(f"  installing into {target.name}/ with pip (this compiles extensions)")
+        command = [str(interpreter), "-m", "pip", "install", "--upgrade", "--target", str(target)]
+        if self.pip_constraints:
+            constraints = root / "constraints.txt"
+            constraints.write_text("".join(f"{line}\n" for line in self.pip_constraints))
+            command.extend(["--constraint", str(constraints)])
         shell.run(
-            [str(interpreter), "-m", "pip", "install", "--upgrade", "--target", str(target), "."],
+            [*command, "."],
             cwd=root,
             log=root / "install.log",
         )

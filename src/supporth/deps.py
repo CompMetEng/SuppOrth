@@ -35,10 +35,12 @@ class BinarySpec:
     aliases: tuple[str, ...] = ()
     # Only installed when a run actually asks for it, rather than by default.
     on_demand: bool = False
+    accepted_versions: tuple[str, ...] = ()
 
 
 DIAMOND_VERSION = "2.1.9"
-MMSEQS_VERSION = "15-6f452"
+# SonicParanoid 2.0.9 and its bundled Pfam profiles require this release.
+MMSEQS_VERSION = "13-45111"
 MCL_VERSION = "14-137"
 BLAST_VERSION = "2.16.0"
 IQTREE_VERSION = "2.3.6"
@@ -64,6 +66,7 @@ SPECS: dict[str, BinarySpec] = {
         purpose="sensitive/fast search used by SonicParanoid",
         wanted_by=("sonicparanoid",),
         version_args=("version",),
+        accepted_versions=("13-45111", "13.45111", "45111b641859ed0ddd875b94d6fd1aef1a675b7e"),
         downloads={
             "linux-x86_64": f"https://github.com/soedinglab/MMseqs2/releases/download/{MMSEQS_VERSION}/mmseqs-linux-avx2.tar.gz",
             "linux-arm64": f"https://github.com/soedinglab/MMseqs2/releases/download/{MMSEQS_VERSION}/mmseqs-linux-arm64.tar.gz",
@@ -411,6 +414,7 @@ def ensure(
 
         present = target.exists()
         if present and _runs(spec, target):
+            _warn_version(spec, target, log)
             log(f"  {name:<10} already present ({target})")
             resolved[name] = target
             continue
@@ -467,6 +471,7 @@ def _adopt(spec: BinarySpec, source: Path, log: Callable[[str], None]) -> Path:
     source = source.resolve()
     if not source.is_file() or not _runs(spec, source):
         raise DependencyError(f"{spec.name}: {source} is not a runnable binary")
+    _warn_version(spec, source, log)
     target = paths.shared_bin() / spec.name
     if source != target:
         if target.exists() or target.is_symlink():
@@ -476,6 +481,19 @@ def _adopt(spec: BinarySpec, source: Path, log: Callable[[str], None]) -> Path:
     manifest.record_binary(spec.name, path=source, version=version, origin="adopted")
     log(f"  {spec.name:<10} adopted from {source}")
     return target
+
+
+def _warn_version(spec: BinarySpec, binary: Path, log: Callable[[str], None]) -> None:
+    if not spec.accepted_versions:
+        return
+    result = shell.run([binary, *spec.version_args], check=False, timeout=60)
+    version = ((result.stdout or "") + (result.stderr or "")).strip()
+    if not set(version.split()).intersection(spec.accepted_versions):
+        log(
+            f"WARNING: {spec.name} at {binary} reports {version or 'an unknown version'}; "
+            f"SonicParanoid 2.0.9 requires MMseqs2 {MMSEQS_VERSION}. "
+            "Provide the compatible binary with --adopt mmseqs=/path/to/mmseqs."
+        )
 
 
 def _install_upstream(spec: BinarySpec, log: Callable[[str], None]) -> Path:

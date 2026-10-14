@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,20 +117,41 @@ CONDA_MARKERS = (
     "anaconda",
     "anaconda2",
     "anaconda3",
+    "anaconda4",
     "miniconda",
     "miniconda2",
     "miniconda3",
+    "miniconda4",
     "miniforge",
+    "miniforge2",
     "miniforge3",
+    "miniforge4",
     "mambaforge",
+    "mambaforge2",
     "mambaforge3",
+    "mambaforge4",
+    "mamba",
+    "micromamba",
+    "micromamba2",
+    "micromamba3",
+    "micromamba4",
 )
 
 
 def is_conda_style(interpreter: Path | str) -> bool:
     """Whether an interpreter belongs to a conda-style distribution."""
-    parts = Path(interpreter).resolve().parts
-    return any(marker in parts for marker in CONDA_MARKERS)
+    try:
+        result = shell.run(
+            [str(interpreter), "-c", "import sys; print(sys.exec_prefix)"],
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    prefix = result.stdout.strip()
+    return any(f"/{marker}/" in prefix for marker in CONDA_MARKERS)
 
 
 def candidates() -> Iterator[Path]:
