@@ -10,6 +10,10 @@ The output contains unique protein pairs between species, the tools supporting
 each pair, and alignment statistics when available. It accepts two or more
 proteomes and keeps one-to-many and many-to-many relationships.
 
+![SuppOrth workflow](img/supporth_workflow.png)
+
+[Workflow as SVG](img/supporth_workflow.svg)
+
 ## Install
 
 Use Python 3.10–3.12 on macOS or Linux. Install SuppOrth, then its predictors:

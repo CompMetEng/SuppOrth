@@ -260,3 +260,40 @@ def test_oma_group_fallback_retains_its_separate_format(tmp_path):
     proteomes = (Proteome('a', tmp_path / 'a.fa', frozenset({'a1'})),
                  Proteome('b', tmp_path / 'b.fa', frozenset({'b1'})))
     assert OMA().parse(table, proteomes).pairs == {('a1', 'b1')}
+
+
+@pytest.mark.parametrize('options', [
+    [],
+    ['-path_fasttree', '/custom/FastTree', '-path_diamond', '/custom/diamond'],
+    ['-path_fasttree=/custom/FastTree', '-path_diamond=/custom/diamond'],
+])
+def test_broccoli_uses_shared_binary_paths_and_preserves_overrides(tmp_path, monkeypatch, options):
+    from supporth.adapters.base import StageContext
+    from supporth.adapters.broccoli import Broccoli
+
+    monkeypatch.setenv('SUPPORTH_HOME', str(tmp_path / 'home'))
+    shared = tmp_path / 'home' / 'bin'
+    shared.mkdir(parents=True)
+    for name in ('FastTree', 'diamond'):
+        binary = shared / name
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o755)
+    assert 'fasttree' not in {path.name for path in shared.iterdir()}
+    adapter = Broccoli()
+    monkeypatch.setattr(adapter, 'installed_root', lambda: tmp_path)
+    monkeypatch.setattr(adapter, 'locate_entrypoint', lambda _: tmp_path / 'broccoli.py')
+    monkeypatch.setattr(adapter, '_interpreter', lambda _: 'python')
+    calls = []
+    monkeypatch.setattr(shell, 'run', lambda command, **kwargs: calls.append(command))
+    proteomes = tuple(Proteome(label, tmp_path / f'{label}.fa', frozenset({label}))
+                      for label in ('a', 'b'))
+    context = StageContext(input_dir=tmp_path / 'input', work_dir=tmp_path / 'work',
+                           proteomes=proteomes, options=options)
+    adapter.run(context)
+    command = calls[0]
+    if options:
+        assert command[-len(options):] == options
+        assert not any(str(shared) in value for value in command)
+    else:
+        assert command[command.index('-path_fasttree') + 1] == str(shared / 'FastTree')
+        assert command[command.index('-path_diamond') + 1] == str(shared / 'diamond')

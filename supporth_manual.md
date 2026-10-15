@@ -186,6 +186,11 @@ Broccoli runs its own DIAMOND search because it requires a different output
 format. SonicParanoid2 uses its own search workflow. Sharing helper binaries
 does not make these predictors share OrthoFinder's search results.
 
+SuppOrth passes the shared DIAMOND and FastTree executable paths directly to
+Broccoli. This avoids differences between `FastTree` and `fasttree` filenames
+on Linux. Native `-path_diamond` and `-path_fasttree` options take precedence
+if you explicitly supply them.
+
 If OrthoFinder is omitted, SuppOrth runs a separate alignment search for the
 consensus statistics. `--alignment none` omits these statistics; it does not
 switch off the predictors' own searches.

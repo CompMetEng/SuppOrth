@@ -47,6 +47,15 @@ class Broccoli(Adapter):
         output = context.work_dir / "results"
         output.mkdir(parents=True, exist_ok=True)
 
+        binary_options = []
+        for flag, binary in (("-path_diamond", "diamond"), ("-path_fasttree", "FastTree")):
+            if any(option == flag or option.startswith(f"{flag}=") for option in context.options):
+                continue
+            executable = shell.which(binary)
+            if executable is None:
+                raise AdapterError(f"missing required binary: {binary}")
+            binary_options.extend([flag, str(executable.absolute())])
+
         argv = [
             self._interpreter(root),
             str(entrypoint),
@@ -54,6 +63,7 @@ class Broccoli(Adapter):
             str(context.input_dir),
             "-threads",
             str(context.threads),
+            *binary_options,
             *context.options,
         ]
         shell.run(argv, cwd=output, log=context.log, timeout=None, threads=context.threads)
