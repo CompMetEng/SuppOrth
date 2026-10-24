@@ -1,4 +1,4 @@
-![SuppOrth](https://raw.githubusercontent.com/fma91/SuppOrth/stand_alone/img/supporth_banner.png)
+![SuppOrth](https://raw.githubusercontent.com/fma91/SuppOrth/main/img/supporth_banner.png)
 
 # SuppOrth manual
 
@@ -313,7 +313,7 @@ Mycoplasma_genitalium	Mycoplasma_hyopneumoniae	gi|1046004|gb|AAC71527.1|	gi|7185
 Mycoplasma_genitalium	Mycoplasma_hyopneumoniae	gi|1045671|gb|AAC71219.1|	gi|71851590|gb|AAZ44198.1|	3	F,S,B	1	1	1	49.7	8.16e-221	625.0
 ```
 
-![Protein-pair overlaps](https://raw.githubusercontent.com/fma91/SuppOrth/stand_alone/img/suppOrth.png)
+![Protein-pair overlaps](https://raw.githubusercontent.com/fma91/SuppOrth/main/img/suppOrth.png)
 
 For two proteomes, `--collapse map1.json,map2.json` also writes
 `suppOrth.genes.tsv`. Mapping files can be JSON dictionaries, pickle files or

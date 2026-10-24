@@ -9,9 +9,35 @@ dist/
 .venv/
 venv/
 .pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
 
 # SuppOrth run output
 work/
+results/
+results_*/
+pairs/
+suppOrth.tsv
+suppOrth.genes.tsv
+agreement_summary.tsv
 *.tsv.gz
 provenance.json
+.update-*/
+.update-publication.*
+*.supporth-restore
+/suppOrth.png
+/suppOrth.svg
+/history/
+
+# Local manuscript drafts, benchmark data and review notes
+/manuscript/
+
+# Editor files
+~$*
+*.swp
+*.swo
+
+# Colleague's installation patch
 supporth_suggestions_EK.patch

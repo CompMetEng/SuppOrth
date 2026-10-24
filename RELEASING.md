@@ -22,7 +22,7 @@ archive. Check installation in another environment, outside the checkout:
 
 ```sh
 python3.10 -m venv /tmp/supporth-wheel-check
-/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.1-py3-none-any.whl
+/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.2-py3-none-any.whl
 /tmp/supporth-wheel-check/bin/python -m pip check
 /tmp/supporth-wheel-check/bin/suppOrth --version
 /tmp/supporth-wheel-check/bin/supporth run --help
