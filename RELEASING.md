@@ -13,16 +13,17 @@ source /tmp/supporth-release/bin/activate
 python -m pip install '.[dev,release]'
 python -m pytest tests
 python -m build
-python -m twine check --strict dist/*
+python -m twine check --strict dist/supporth-0.4.3*
 ```
 
-Build from a clean checkout so `dist/` contains only the intended release.
+Build from the source you intend to release. Select the version explicitly
+when checking or uploading so older files in `dist/` are not included.
 `python -m build` creates both the source archive and a wheel built from that
 archive. Check installation in another environment, outside the checkout:
 
 ```sh
 python3.10 -m venv /tmp/supporth-wheel-check
-/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.2-py3-none-any.whl
+/tmp/supporth-wheel-check/bin/python -m pip install dist/supporth-0.4.3-py3-none-any.whl
 /tmp/supporth-wheel-check/bin/python -m pip check
 /tmp/supporth-wheel-check/bin/suppOrth --version
 /tmp/supporth-wheel-check/bin/supporth run --help
@@ -37,8 +38,8 @@ Create PyPI and TestPyPI accounts and use their API tokens when Twine asks for
 credentials. Tokens must not be stored in the repository.
 
 ```sh
-python -m twine upload --repository testpypi dist/*
-python -m twine upload dist/*
+python -m twine upload --repository testpypi dist/supporth-0.4.3*
+python -m twine upload dist/supporth-0.4.3*
 ```
 
 TestPyPI and PyPI are separate services. Confirm the TestPyPI metadata and files
