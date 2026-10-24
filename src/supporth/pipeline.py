@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,11 +11,12 @@ from typing import Callable
 
 import pandas as pd
 
-from . import canonical, consensus, figures, manifest, paths, similarity, shell
+from . import canonical, consensus, figures, manifest, paths, similarity, shell, updates
 from .adapters import Adapter, StageContext, resolve
 from .adapters.oma import OMA
 from .adapters.orthofinder import find_alignment_dir
 from .proteomes import Proteome, load_proteomes, stage_input_dir
+from .updates import file_digest as _sha256
 
 
 class PipelineError(RuntimeError):
@@ -33,6 +34,7 @@ class RunConfig:
     threads: int = 0
     alignment: str = "diamond"
     resume: bool = False
+    update: bool = False
     support_lv: int = 3
     identity_filter: float = 80.0
     collapse: tuple[Path, Path] | None = None
@@ -40,6 +42,8 @@ class RunConfig:
     oma: Path | None = None
 
     def __post_init__(self) -> None:
+        if self.resume and self.update:
+            raise ValueError("--resume and --update cannot be combined")
         if self.fastas:
             self.fastas = tuple(Path(path) for path in self.fastas)
         elif self.fasta1 is not None and self.fasta2 is not None:
@@ -65,6 +69,7 @@ class StageReport:
     dropped_same_species: int = 0
     note: str = ""
     error: str = ""
+    native_root: str = ""
 
 
 def warn_support_threshold(level: int, available: int, log: Callable[[str], None]) -> None:
@@ -80,6 +85,10 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     paths.ensure_layout()
 
     outdir = Path(config.outdir).resolve()
+    try:
+        updates.recover_publication(outdir)
+    except (updates.UpdateError, OSError, ValueError) as error:
+        raise PipelineError(f"cannot recover interrupted update: {error}") from error
     (outdir / "pairs").mkdir(parents=True, exist_ok=True)
     work_root = outdir / "work"
     work_root.mkdir(parents=True, exist_ok=True)
@@ -89,6 +98,25 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         log(f"Species {index}: {proteome.label} ({proteome.size} proteins)")
 
     adapters = resolve(config.tools)
+    previous = None
+    added = ()
+    config.outdir = outdir
+    provenance_file = outdir / "provenance.json"
+    saved = json.loads(provenance_file.read_text()) if provenance_file.is_file() else {}
+    if config.resume and saved:
+        current = {p.label: _sha256(p.fasta) for p in proteomes}
+        recorded = {label: r.get("sha256") for label, r in saved.get("inputs", {}).items()}
+        if current != recorded:
+            raise PipelineError("inputs changed; use --update to add proteomes, or start a new run")
+    if config.update:
+        try:
+            previous, added = updates.validate_update(config, proteomes, adapters)
+        except updates.UpdateError as error:
+            raise PipelineError(str(error)) from error
+        # Retain the original species order when orienting unordered pairs.
+        by_label = {p.label: p for p in proteomes}
+        proteomes = tuple(by_label[label] for label in previous["inputs"]) + added
+        log(f"Updating {len(previous['inputs'])} proteomes with {len(added)} additional proteome(s)")
     threads = shell.cpu_count(config.threads or None)
 
     _preflight(adapters, config.tool_options, log)
@@ -96,16 +124,22 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
     warn_support_threshold(config.support_lv, selected_count, log)
 
     input_dir = stage_input_dir(work_root / "input", proteomes)
+    added_input_dir = stage_input_dir(work_root / "added_input", added) if added else None
 
     reports: list[StageReport] = []
     results: list[canonical.PredictorResult] = []
     alignment_dir = find_alignment_dir(work_root / "orthofinder")
+    saved_reports = {r["tool"]: r for r in saved.get("predictors", [])}
+    if "orthofinder" in saved_reports:
+        of_root = Path(saved_reports["orthofinder"].get("native_root") or work_root / "orthofinder" / "results")
+        alignment_dir = find_alignment_dir(of_root)
 
     for index, adapter in enumerate(adapters, start=1):
         log(f"\n[{index}/{len(adapters)}] {adapter.name}")
         pairs_json = outdir / "pairs" / f"{adapter.name}.json"
 
         if config.resume and pairs_json.exists():
+            saved_report = saved_reports.get(adapter.name, {})
             result = canonical.read_json(pairs_json)
             results.append(result)
             reports.append(
@@ -115,8 +149,9 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
                     status="reused",
                     seconds=0.0,
                     n_pairs=len(result.pairs),
-                    method={},
+                    method=saved_report.get("method", {}),
                     commit=_commit(adapter),
+                    native_root=saved_report.get("native_root", ""),
                 )
             )
             log(f"  reusing {pairs_json.name} ({len(result.pairs)} pairs)")
@@ -131,10 +166,16 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             threads=threads,
             options=config.tool_options.get(adapter.name, []),
             alignment_dir=alignment_dir,
+            previous_root=updates.native_root(previous, adapter.name, work_root / adapter.name)
+            if previous else None,
+            added_input_dir=added_input_dir,
         )
         context.work_dir.mkdir(parents=True, exist_ok=True)
 
         stage_started = time.monotonic()
+        if config.update:
+            log("  rerunning all four Broccoli steps on the expanded proteomes" if adapter.name == "broccoli"
+                else "  reusing previous searches; computing missing comparisons")
         try:
             native_root = adapter.run(context)
             result = adapter.parse(native_root, proteomes)
@@ -154,11 +195,17 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
                     error=str(error),
                 )
             )
+            if config.update:
+                raise PipelineError(
+                    f"{adapter.name} update failed; consensus outputs were not replaced. "
+                    f"See {context.log} and retry with --update."
+                ) from error
             continue
 
         elapsed = time.monotonic() - stage_started
-        canonical.write_json(result, pairs_json)
-        canonical.write_legacy_json(result, outdir / "pairs" / f"{adapter.name}_result_dict.json")
+        if not config.update:
+            canonical.write_json(result, pairs_json)
+            canonical.write_legacy_json(result, outdir / "pairs" / f"{adapter.name}_result_dict.json")
         results.append(result)
         reports.append(
             StageReport(
@@ -172,6 +219,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
                 dropped_unknown=result.dropped_unknown,
                 dropped_same_species=result.dropped_same_species,
                 note=result.note,
+                native_root=str(native_root.resolve()),
             )
         )
         log(f"  {result.summary()} in {elapsed / 60:.1f} min")
@@ -208,6 +256,7 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
             work_root / "alignment",
             threads=threads,
             program=config.alignment,
+            reuse_labels=frozenset(previous["inputs"]) if previous else frozenset(),
             log=log,
         )
     log(f"  {len(index)} aligned pairs")
@@ -224,14 +273,21 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         f"(Lv_support ≥ {config.support_lv} or Identity > {config.identity_filter})"
     )
 
-    output_tsv = outdir / "suppOrth.tsv"
+    output_dir = Path(tempfile.mkdtemp(prefix=".update-", dir=outdir)) if config.update else outdir
+    output_tsv = output_dir / "suppOrth.tsv"
+    if config.update:
+        if any(report.status == "failed" for report in reports):
+            raise PipelineError("update failed; consensus outputs were not replaced")
+        for result in results:
+            canonical.write_json(result, output_dir / "pairs" / f"{result.tool}.json")
+            canonical.write_legacy_json(result, output_dir / "pairs" / f"{result.tool}_result_dict.json")
     table.to_csv(output_tsv, sep="\t", index=False)
 
     summary = consensus.agreement_summary(table)
-    summary.to_csv(outdir / "agreement_summary.tsv", sep="\t", index=False)
+    summary.to_csv(output_dir / "agreement_summary.tsv", sep="\t", index=False)
 
     figure_path = figures.write_support_figure(
-        results, outdir / "suppOrth.png", log=log
+        results, output_dir / "suppOrth.png", log=log
     )
 
     collapsed_path = None
@@ -239,14 +295,36 @@ def run_pipeline(config: RunConfig, log: Callable[[str], None] = print) -> dict:
         if len(proteomes) != 2:
             raise PipelineError("--collapse is only defined for exactly two proteomes")
         collapsed = consensus.collapse_to_genes(table, *config.collapse)
-        collapsed_path = outdir / "suppOrth.genes.tsv"
+        collapsed_path = output_dir / "suppOrth.genes.tsv"
         collapsed.to_csv(collapsed_path, sep="\t", index=False)
         log(f"Collapsed to {len(collapsed)} gene pairs")
 
     provenance = _provenance(config, proteomes, reports, table, threads)
-    with (outdir / "provenance.json").open("w") as handle:
+    if previous:
+        history = output_dir / "history"
+        history.mkdir(exist_ok=True)
+        number = 1
+        snapshot = history / f"provenance_{number}.json"
+        while (outdir / "history" / snapshot.name).exists():
+            number += 1
+            snapshot = history / f"provenance_{number}.json"
+        snapshot.write_text(json.dumps(previous, indent=2) + "\n")
+        provenance["update"] = {
+            "added_proteomes": [p.label for p in added],
+            "previous_provenance": str(outdir / "history" / snapshot.name),
+            "broccoli": "full rerun" if any(a.name == "broccoli" for a in adapters) else "not selected",
+        }
+    with (output_dir / "provenance.json").open("w") as handle:
         json.dump(provenance, handle, indent=2)
         handle.write("\n")
+    if config.update:
+        try:
+            updates.publish_outputs(output_dir, outdir)
+        except OSError as error:
+            raise PipelineError(f"could not publish updated outputs: {error}") from error
+        output_tsv = outdir / "suppOrth.tsv"
+        if figure_path:
+            figure_path = outdir / figure_path.name
 
     log(f"\nTotal runtime {(time.monotonic() - started) / 60:.1f} min")
     log(f"Consensus table: {output_tsv}")
@@ -307,8 +385,9 @@ def _ingest_oma(
             error=str(error),
         )
 
-    canonical.write_json(result, pairs_json)
-    canonical.write_legacy_json(result, outdir / "pairs" / "oma_result_dict.json")
+    if not config.update:
+        canonical.write_json(result, pairs_json)
+        canonical.write_legacy_json(result, outdir / "pairs" / "oma_result_dict.json")
     elapsed = time.monotonic() - started
     log(f"  {result.summary()} in {elapsed:.1f} s")
     return result, StageReport(
@@ -353,14 +432,6 @@ def _commit(adapter: Adapter) -> str:
     return (record or {}).get("commit", "unknown")
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _provenance(
     config: RunConfig,
     proteomes: tuple[Proteome, ...],
@@ -387,6 +458,7 @@ def _provenance(
             "support_lv": config.support_lv,
             "identity_filter": config.identity_filter,
             "oma": str(config.oma) if config.oma else None,
+            "update": config.update,
         },
         "predictors": [
             {
@@ -402,6 +474,7 @@ def _provenance(
                 "dropped_same_species": report.dropped_same_species,
                 "note": report.note,
                 "error": report.error,
+                "native_root": report.native_root,
             }
             for report in reports
         ],

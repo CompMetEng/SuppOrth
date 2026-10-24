@@ -321,14 +321,66 @@ two-column TSV files. Gene-level results are not plotted.
 
 ## Resume and maintenance
 
+### Add proteomes to a completed run
+
+Put the original FASTAs and the new strains in one directory, then use the
+existing SuppOrth output directory:
+
+```sh
+suppOrth run -f expanded_proteomes/ -o results/ -t 8 --update
+```
+
+Include every original proteome with its original label and unchanged file
+contents. If you used `--labels`, provide labels for the complete expanded
+collection. Repeat the original `--tools`, `--alignment` and `--opt` settings.
+Thread counts and consensus thresholds can change. SuppOrth checks input file
+hashes, predictor commits and recorded shared-binary versions before starting.
+
+The predictors handle the expanded collection differently:
+
+- **OrthoFinder:** receives its previous working directory with `-b` and only
+  the additional FASTAs with `-f`. It reuses previous similarity searches,
+  computes the new comparisons and recalculates orthogroups, alignments,
+  trees and orthologue predictions. Updated native results are written to a
+  separate directory. Earlier working directories must remain available:
+  OrthoFinder links to their search files rather than copying them.
+- **SonicParanoid:** uses the same native output directory. Its `snapshot.tsv`
+  identifies an update; existing alignments and applicable pairwise tables
+  are reused. Missing comparisons are calculated and multispecies groups are
+  rebuilt. SuppOrth imports only the latest run's final pairwise export.
+  Do not pass `-ow`, which forces recomputation. A custom `-p` project ID
+  must be new for each update.
+- **Broccoli:** reruns all four steps. Its `-steps` option can restart analysis
+  from existing intermediate files, but cannot incorporate new proteomes
+  into those files. Selective reuse of Broccoli searches is not implemented.
+
+Keep `work/` and the native predictor files; saved `pairs/*.json` files alone
+cannot supply the previous searches. If OrthoFinder was omitted, SuppOrth
+also reuses its own completed alignment tables between unchanged proteomes.
+
+The update replaces `suppOrth.tsv`, the pair JSONs, summaries and figures with
+predictions for the expanded collection. Orthology assignments among the
+original species can change. Previous provenance is saved under `history/`;
+the new provenance records the added proteomes and native result directories.
+Identical search results do not guarantee identical final predictions to a
+fresh run: downstream tree inference can produce different trees.
+If a predictor fails, the previous consensus files are retained. Inspect its
+stage log and retry with `--update`.
+
+If the original run included OMA, supply `--oma` again with an OMA analysis
+covering the expanded collection. SuppOrth imports it without running OMA.
+
+### Resume the same inputs
+
 Resume completed stages with the same inputs and settings:
 
 ```sh
 suppOrth run -f proteomes/ -o results/ --resume
 ```
 
-Resume reads saved predictions without checking whether inputs or options have
-changed. Use a new output directory after changing either. Failed stages produce
+Resume reads saved predictions. When provenance is available, changed inputs
+are rejected; use `--update` to add proteomes. Resume does not validate changed
+predictor options, so keep those unchanged or use a new output directory. Failed stages produce
 an error status and a nonzero exit code; completed results remain available.
 
 Inspect helper binaries and installation disk usage:

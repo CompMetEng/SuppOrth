@@ -151,9 +151,22 @@ class OrthoFinder(Adapter):
         root = self.installed_root()
         entrypoint = self.locate_entrypoint(root)
 
-        # OrthoFinder aborts if the results directory already exists.
+        previous = None
         output = context.work_dir / "results"
-        if output.exists():
+        if context.previous_root is not None:
+            previous = find_alignment_dir(context.previous_root)
+            if previous is None:
+                raise AdapterError(f"no reusable OrthoFinder searches under {context.previous_root}")
+            if not (previous.parent / "Log.txt").is_file():
+                raise AdapterError(f"OrthoFinder update requires {previous.parent / 'Log.txt'}")
+            if context.added_input_dir is None:
+                raise AdapterError("OrthoFinder update requires the additional proteomes")
+            number = 1
+            output = previous.parent.parent / f"Results_update_{number}"
+            while output.exists():
+                number += 1
+                output = previous.parent.parent / f"Results_update_{number}"
+        elif output.exists():
             shutil.rmtree(output)
         context.work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -170,9 +183,7 @@ class OrthoFinder(Adapter):
                 self._interpreter(root),
                 str(entrypoint),
                 "-f",
-                str(context.input_dir),
-                "-o",
-                str(output),
+                str(context.added_input_dir if previous else context.input_dir),
                 "-t",
                 str(context.threads),
                 "-a",
@@ -180,7 +191,15 @@ class OrthoFinder(Adapter):
                 "-S",
                 search_program,
             ]
+            if previous:
+                # Version 2.5.5 rejects -o together with -b. Updated results
+                # must be siblings of the previous Results_* directory.
+                argv += ["-b", str(previous.parent), "-n", f"update_{number}"]
+            else:
+                argv += ["-o", str(output)]
             passthrough = of_config.strip_option(context.options, "-S")
+            if previous:
+                passthrough = of_config.strip_option(passthrough, "-n")
             # Defaults are only supplied when the run did not override them, so
             # a pass-through "-M dendroblast" does not collide with MSA mode.
             if "-M" not in set(passthrough):

@@ -55,6 +55,8 @@ class StageContext:
     threads: int = 1
     options: list[str] = field(default_factory=list)
     alignment_dir: Path | None = None
+    previous_root: Path | None = None
+    added_input_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.proteomes:

@@ -95,7 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="BLAST or DIAMOND for OrthoFinder; other steps reuse those "
              "tables for Identity/e-value/bitscore (default: diamond)",
     )
-    run.add_argument("--resume", action="store_true", help="reuse completed stages in the output directory")
+    continuation = run.add_mutually_exclusive_group()
+    continuation.add_argument("--resume", action="store_true", help="reuse completed stages in the output directory")
+    continuation.add_argument("--update", action="store_true",
+                              help="add proteomes to this output directory, reusing supported searches; "
+                                   "provide all previous and new FASTAs")
     run.add_argument("--supportLv", dest="support_lv", type=int, default=3,
                      metavar="N", choices=(1, 2, 3, 4),
                      help="keep pairs found by at least N predictors (default: 3)")
@@ -284,6 +288,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         threads=args.threads,
         alignment=args.alignment,
         resume=args.resume,
+        update=args.update,
         support_lv=args.support_lv,
         identity_filter=args.identity_filter,
         collapse=collapse,

@@ -83,18 +83,48 @@ def index_from_orthofinder(
             f"not cover {names}"
         )
 
+    search_dirs = orthofinder_search_dirs(work_dir)
     names = _orthofinder_sequence_names(work_dir / "SequenceIDs.txt")
     index = SimilarityIndex()
     for first in sorted(wanted):
         for second in sorted(wanted):
             if first == second:
                 continue
-            table = _orthofinder_blast_table(work_dir, first, second)
+            table = None
+            for directory in search_dirs:
+                table = _orthofinder_blast_table(directory, first, second)
+                if table is not None:
+                    break
             if table is None:
                 continue
             log(f"  reading {table.name}")
             _load_orthofinder_table(table, names, index)
     return index
+
+
+def orthofinder_search_dirs(work_dir: Path) -> list[Path]:
+    """Follow OrthoFinder's links to searches retained by earlier runs."""
+    directories = []
+    current = work_dir.resolve()
+    while True:
+        if current in directories:
+            raise ValueError(f"cycle in OrthoFinder previous_wd.txt chain at {current}")
+        if not current.is_dir():
+            raise ValueError(f"missing previous OrthoFinder working directory: {current}")
+        directories.append(current)
+        link = current / "previous_wd.txt"
+        if not link.exists():
+            return directories
+        lines = link.read_text().splitlines()
+        if not lines or not lines[0].strip():
+            raise ValueError(f"empty OrthoFinder previous working-directory link: {link}")
+        target = Path(lines[0].strip())
+        if not target.is_absolute():
+            target = current / target
+        if not target.is_dir():
+            # OrthoFinder also resolves relocated sibling results by their names.
+            target = work_dir / ".." / ".." / target.parent.name / target.name
+        current = target.resolve()
 
 
 def _orthofinder_blast_table(work_dir: Path, first: str, second: str) -> Path | None:
@@ -167,6 +197,7 @@ def build_index(
     program: str = "diamond",
     evalue: float = 1e-3,
     max_targets: int = 10,
+    reuse_labels: frozenset[str] = frozenset(),
     log=print,
 ) -> SimilarityIndex:
     loaded = as_proteomes(proteomes, *rest)
@@ -180,14 +211,22 @@ def build_index(
 
     runner = _diamond if program == "diamond" else _blastp
     for subject in loaded:
-        database = _make_database(subject, work_dir, threads, program)
+        database = None
         for query in loaded:
             if query is subject:
                 continue
             tag = f"{query.label}__{subject.label}"
             output = work_dir / f"{tag}.tsv"
+            if query.label in reuse_labels and subject.label in reuse_labels and output.is_file():
+                log(f"  reusing {output.name}")
+                index.load_tabular(output)
+                continue
+            if database is None:
+                database = _make_database(subject, work_dir, threads, program)
             log(f"  {program} {query.label} vs {subject.label}")
-            runner(query, database, work_dir, output, threads, evalue, max_targets, tag)
+            temporary = output.with_suffix(".tsv.part")
+            runner(query, database, work_dir, temporary, threads, evalue, max_targets, tag)
+            temporary.replace(output)
             index.load_tabular(output)
     return index
 

@@ -10,9 +10,9 @@ The output contains unique protein pairs between species, the tools supporting
 each pair, and alignment statistics when available. It accepts two or more
 proteomes and keeps one-to-many and many-to-many relationships.
 
-![SuppOrth workflow](img/supporth_workflow.png)
+![SuppOrth workflow](https://raw.githubusercontent.com/fma91/SuppOrth/development/img/supporth_workflow.png)
 
-[Workflow as SVG](img/supporth_workflow.svg)
+[Workflow as SVG](https://github.com/fma91/SuppOrth/blob/development/img/supporth_workflow.svg)
 
 ## Install
 
@@ -65,6 +65,18 @@ suppOrth run -f proteomes/ -o results/ --supportLv 2 --identity_filter 90
 
 Use `--supportLv 1` to keep every predicted cross-species pair. Support counts
 measure agreement between methods; they are not probabilities.
+
+To add strains later, include the original and additional FASTAs in the input
+directory and update the same results directory:
+
+```sh
+suppOrth run -f expanded_proteomes/ -o results/ -t 8 --update
+```
+
+OrthoFinder and SonicParanoid reuse previous sequence searches. Broccoli reruns
+all four steps. Orthologue predictions and the consensus are recalculated for
+the expanded collection. Keep the original FASTAs and predictor settings
+unchanged; see the [update guide](supporth_manual.md#add-proteomes-to-a-completed-run).
 
 ## Include OMA
 

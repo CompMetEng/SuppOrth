@@ -268,6 +268,8 @@ class SonicParanoid(Adapter):
         entrypoint = self.locate_entrypoint(root)
 
         output = context.work_dir / "results"
+        if context.previous_root is not None and not (output / "snapshot.tsv").is_file():
+            raise AdapterError(f"SonicParanoid update requires {output / 'snapshot.tsv'}")
         output.mkdir(parents=True, exist_ok=True)
 
         python = str(self.prefix_interpreter(root) or self.python())
@@ -280,6 +282,9 @@ class SonicParanoid(Adapter):
             str(context.threads),
             *context.options,
         ]
+        # Export the final pairwise predictions, rather than expanding groups.
+        if not any(o in context.options for o in ("-op", "--output-pairs")):
+            flags.append("-op")
         if sys.platform == "darwin":
             argv = [python, "-c", self._DARWIN_FORK_LAUNCHER, *flags]
         else:
@@ -292,7 +297,14 @@ class SonicParanoid(Adapter):
             timeout=None,
             threads=context.threads,
         )
-        return output
+        info = output / "last_run_info.txt"
+        if info.is_file():
+            for line in info.read_text().splitlines():
+                if line.startswith("Run directory:"):
+                    run_dir = Path(line.split("\t", 1)[1].strip())
+                    if run_dir.is_dir() and run_dir.resolve().parent == (output / "runs").resolve():
+                        return run_dir
+        raise AdapterError(f"SonicParanoid did not record its completed run directory in {info}")
 
     def parse(self, native_root: Path, proteomes: Sequence[Proteome] | Proteome, *rest: Proteome) -> PredictorResult:
         loaded = (proteomes, *rest) if isinstance(proteomes, Proteome) else tuple(proteomes)
